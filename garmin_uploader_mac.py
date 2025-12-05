@@ -19,7 +19,6 @@ try:
     DND_AVAILABLE = True
 except ImportError:
     DND_AVAILABLE = False
-    print("Note: Install tkinterdnd2 for drag & drop support: pip install tkinterdnd2")
 
 
 class GarminUploaderMac:
@@ -51,6 +50,7 @@ class GarminUploaderMac:
         # Track drag state for visual feedback
         self.is_dragging = False
         
+        self.create_menu()
         self.create_ui()
     
     def check_openmtp(self):
@@ -60,6 +60,44 @@ class GarminUploaderMac:
             self.home / "Applications/OpenMTP.app"
         ]
         return any(p.exists() for p in paths)
+    
+    def create_menu(self):
+        """Create the application menu bar"""
+        menubar = Menu(self.root)
+        self.root.config(menu=menubar)
+        
+        # Tools menu
+        tools_menu = Menu(menubar, tearoff=0)
+        menubar.add_cascade(label="Tools", menu=tools_menu)
+        
+        # GOTOES online tools
+        tools_menu.add_command(label="🔧 Repair FIT File", 
+                              command=lambda: webbrowser.open('https://gotoes.org/strava/Combine_FIT_Files.php'))
+        tools_menu.add_command(label="🔗 Merge FIT/GPX Files", 
+                              command=lambda: webbrowser.open('https://gotoes.org/strava/Combine_GPX_TCX_FIT_Files.php'))
+        tools_menu.add_command(label="📊 View FIT File Data", 
+                              command=lambda: webbrowser.open('https://gotoes.org/strava/View_FIT_Data.php'))
+        tools_menu.add_command(label="🕐 Add Timestamps to GPX", 
+                              command=lambda: webbrowser.open('https://gotoes.org/strava/Add_Timestamps_To_GPX.php'))
+        tools_menu.add_separator()
+        tools_menu.add_command(label="📉 Shrink FIT File", 
+                              command=lambda: webbrowser.open('https://gotoes.org/strava/Shrink_FIT_File.php'))
+        tools_menu.add_command(label="⏱️ Time-Shift Activity", 
+                              command=lambda: webbrowser.open('https://gotoes.org/strava/Adjust_Activity_Time.php'))
+        tools_menu.add_command(label="🏁 Race Repair (GPS)", 
+                              command=lambda: webbrowser.open('https://gotoes.org/strava/Race_Repair.php'))
+        tools_menu.add_separator()
+        tools_menu.add_command(label="🌐 All GOTOES Tools...", 
+                              command=lambda: webbrowser.open('https://gotoes.org/strava/index.php'))
+        
+        # Help menu
+        help_menu = Menu(menubar, tearoff=0)
+        menubar.add_cascade(label="Help", menu=help_menu)
+        help_menu.add_command(label="How to Use", command=self.show_help)
+        help_menu.add_command(label="Get OpenMTP", 
+                             command=lambda: webbrowser.open('https://openmtp.ganeshrvel.com'))
+        help_menu.add_separator()
+        help_menu.add_command(label="About", command=self.show_about)
     
     def create_ui(self):
         """Create the main interface"""
@@ -506,6 +544,15 @@ You still need to drag them to OpenMTP."""
         
         Button(frame, text="Close", command=help_window.destroy,
                font=('SF Pro Text', 11), padx=15, pady=5, relief=FLAT).pack()
+    
+    def show_about(self):
+        """Show about dialog"""
+        messagebox.showinfo("About", 
+            "Garmin Workout Uploader\n\n"
+            "Version 1.0\n\n"
+            "A simple tool to upload .FIT workout files\n"
+            "to your Garmin watch via OpenMTP.\n\n"
+            "Tools menu powered by GOTOES.org")
 
 
 def main():
@@ -516,8 +563,7 @@ def main():
     if DND_AVAILABLE:
         try:
             root = TkinterDnD.Tk()
-        except RuntimeError as e:
-            print(f"Note: Drag & drop unavailable ({e})")
+        except RuntimeError:
             DND_AVAILABLE = False
             root = Tk()
     else:
