@@ -154,31 +154,47 @@ class GarminUploaderWin:
             if not garmin_folder:
                 return False, "Could not find GARMIN folder on device"
 
-            # Navigate to or create NewFiles folder
-            newfiles_folder = None
+            # Try Workouts folder first (newer watches), then NewFiles (older watches)
+            target_folder = None
+            folder_used = None
+
+            # Check for existing Workouts folder
             for item in garmin_folder.Items():
-                if item.Name.upper() == "NEWFILES":
-                    newfiles_folder = item.GetFolder
+                if item.Name.upper() == "WORKOUTS":
+                    target_folder = item.GetFolder
+                    folder_used = "Workouts"
                     break
 
-            if not newfiles_folder:
-                # Try to create NewFiles folder
-                garmin_folder.NewFolder("NewFiles")
-                time.sleep(1.0)  # Give MTP time to create folder
+            # If no Workouts folder, try NewFiles
+            if not target_folder:
                 for item in garmin_folder.Items():
                     if item.Name.upper() == "NEWFILES":
-                        newfiles_folder = item.GetFolder
+                        target_folder = item.GetFolder
+                        folder_used = "NewFiles"
                         break
 
-            if not newfiles_folder:
-                return False, "Could not access or create NewFiles folder"
+            # If neither exists, create NewFiles as fallback
+            if not target_folder:
+                try:
+                    garmin_folder.NewFolder("NewFiles")
+                    time.sleep(1.0)  # Give MTP time to create folder
+                    for item in garmin_folder.Items():
+                        if item.Name.upper() == "NEWFILES":
+                            target_folder = item.GetFolder
+                            folder_used = "NewFiles"
+                            break
+                except:
+                    pass
+
+            if not target_folder:
+                return False, "Could not access or create Workouts/NewFiles folder"
 
             # Copy files
             copied = 0
             for filepath in files:
                 try:
                     # CopyHere flags: 4 = no progress dialog, 16 = yes to all
-                    newfiles_folder.CopyHere(filepath, 4 | 16)
+                    target_folder.CopyHere(filepath, 4 | 16)
                     copied += 1
                     time.sleep(0.5)  # Give MTP time between files
                 except Exception as e:
@@ -186,7 +202,7 @@ class GarminUploaderWin:
                     continue
 
             if copied > 0:
-                return True, f"{copied} file(s) transferred"
+                return True, f"{copied} file(s) transferred to GARMIN/{folder_used}"
             else:
                 return False, "No files were copied"
 
@@ -836,19 +852,36 @@ class GarminUploaderWin:
 
         if not self.is_mtp and self.garmin_newfiles:
             # Mass Storage Mode - direct file copy
-            if not os.path.exists(self.garmin_newfiles):
-                os.makedirs(self.garmin_newfiles)
+            # Try Workouts folder first (newer watches), then NewFiles (older watches)
+            garmin_root = os.path.dirname(self.garmin_newfiles)
+            workouts_path = os.path.join(garmin_root, "Workouts")
+
+            target_path = None
+            folder_name = None
+
+            if os.path.exists(workouts_path):
+                target_path = workouts_path
+                folder_name = "Workouts"
+            elif os.path.exists(self.garmin_newfiles):
+                target_path = self.garmin_newfiles
+                folder_name = "NewFiles"
+            else:
+                # Create NewFiles as fallback
+                os.makedirs(self.garmin_newfiles, exist_ok=True)
+                target_path = self.garmin_newfiles
+                folder_name = "NewFiles"
+
             count = 0
             for f in self.selected_files:
                 try:
-                    shutil.copy2(f, os.path.join(self.garmin_newfiles, os.path.basename(f)))
+                    shutil.copy2(f, os.path.join(target_path, os.path.basename(f)))
                     count += 1
                 except:
                     pass
             if count:
                 self.transfer_btn.config(text="✓ Transferred!", bg='#28a745', state=DISABLED)
-                self.transfer_status.config(text=f"✅ {count} file(s) transferred to Garmin!", fg='#2e7d32')
-                messagebox.showinfo("Success", f"✅ {count} file(s) transferred to your Garmin!\n\nYou can now disconnect your watch.")
+                self.transfer_status.config(text=f"✅ {count} file(s) transferred to GARMIN/{folder_name}!", fg='#2e7d32')
+                messagebox.showinfo("Success", f"✅ {count} file(s) transferred to GARMIN/{folder_name}!\n\nYou can now disconnect your watch.")
         elif self.is_mtp and WIN32COM_AVAILABLE:
             # MTP Mode - use COM API for transfer
             self.transfer_btn.config(text="Transferring...", state=DISABLED)
