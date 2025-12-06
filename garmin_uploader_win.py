@@ -904,22 +904,46 @@ class GarminUploaderWin:
                 self.transfer_btn.config(text="✓ Transferred!", bg='#28a745', state=DISABLED)
                 self.transfer_status.config(text=f"✅ {count} file(s) transferred to GARMIN/{folder_name}!", fg='#2e7d32')
                 messagebox.showinfo("Success", f"✅ {count} file(s) transferred to GARMIN/{folder_name}!\n\nYou can now disconnect your watch.")
-        elif self.is_mtp and WIN32COM_AVAILABLE:
-            # MTP Mode - use COM API for transfer
-            self.transfer_btn.config(text="Transferring...", state=DISABLED)
-            self.transfer_status.config(text="Transferring files via MTP...", fg='#666')
-            self.root.update()
+        elif self.is_mtp:
+            # MTP Mode - open File Explorer for manual drag-and-drop
+            # Stage files first
+            for f in self.staging_folder.glob('*.fit'):
+                f.unlink()
+            for f in self.staging_folder.glob('*.FIT'):
+                f.unlink()
 
-            success, message = self.transfer_mtp_files(self.selected_files)
+            count = 0
+            for f in self.selected_files:
+                try:
+                    shutil.copy2(f, self.staging_folder / os.path.basename(f))
+                    count += 1
+                except:
+                    pass
 
-            if success:
-                self.transfer_btn.config(text="✓ Transferred!", bg='#28a745')
-                self.transfer_status.config(text=f"✅ {message} to Garmin!", fg='#2e7d32')
-                messagebox.showinfo("Success", f"✅ {message} to your Garmin!\n\nYou can now disconnect your watch.")
-            else:
-                self.transfer_btn.config(text="Transfer Files", bg='#007AFF', state=NORMAL)
-                self.transfer_status.config(text=f"❌ {message}", fg='#dc3545')
-                messagebox.showerror("Transfer Failed", f"Could not transfer files via MTP:\n\n{message}\n\nTry reconnecting your watch or using Mass Storage mode.")
+            if count:
+                # Try to open Garmin Workouts folder in File Explorer
+                device_name = self.mtp_device_name.replace(" - ", "_").replace(" ", "_")
+
+                # Open staging folder
+                subprocess.Popen(['explorer', str(self.staging_folder)])
+                time.sleep(0.3)
+
+                # Try to open Garmin device in explorer
+                # Use shell: protocol to open portable devices
+                try:
+                    subprocess.Popen(['explorer', f'shell::{{20D04FE0-3AEA-1069-A2D8-08002B30309D}}'])
+                except:
+                    pass
+
+                self.transfer_btn.config(text="✓ Files Ready!", bg='#FF9500', state=DISABLED)
+                self.transfer_status.config(text=f"✓ {count} file(s) ready. Drag from left window to Garmin Workouts folder.", fg='#FF9500')
+                messagebox.showinfo("Manual Transfer",
+                    f"✓ {count} file(s) are ready!\n\n"
+                    f"Two File Explorer windows have opened:\n\n"
+                    f"1. Left: Your workout files\n"
+                    f"2. Right: This PC\n\n"
+                    f"Navigate to: {self.mtp_device_name} → Internal Storage → GARMIN → Workouts\n\n"
+                    f"Then drag the files from left to right.")
         else:
             # Fallback - stage files for manual drag and drop
             for f in self.staging_folder.glob('*.fit'):
