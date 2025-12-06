@@ -42,14 +42,11 @@ jobs:
 
     - name: Build with PyInstaller
       run: |
-        $iconArg = if (Test-Path "icon.ico") { "--icon=icon.ico" } else { "" }
-        pyinstaller --name "GarminWorkoutUploader" `
-          --windowed `
-          --onefile `
-          --hidden-import=win32timezone `
-          $iconArg `
-          --add-data "version.py;." `
-          garmin_uploader_win.py
+        if (Test-Path "icon.ico") {
+          pyinstaller --name "GarminWorkoutUploader" --windowed --onefile --hidden-import=win32timezone --icon=icon.ico --add-data "version.py;." garmin_uploader_win.py
+        } else {
+          pyinstaller --name "GarminWorkoutUploader" --windowed --onefile --hidden-import=win32timezone --add-data "version.py;." garmin_uploader_win.py
+        }
 
     - name: Create installer with Inno Setup
       run: |
