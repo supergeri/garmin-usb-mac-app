@@ -117,41 +117,57 @@ class GarminUploaderWin:
             # Find the Garmin device in "This PC"
             # Namespace 17 = This PC (My Computer)
             this_pc = shell.Namespace(17)
-            garmin_folder = None
+            device_item = None
 
             # Search for Garmin device
             for item in this_pc.Items():
                 if self.mtp_device_name and self.mtp_device_name.lower() in item.Name.lower():
-                    garmin_folder = shell.Namespace(item.Path)
+                    device_item = item
+                    break
+
+            if not device_item:
+                return False, "Could not find Garmin device in This PC"
+
+            # Get device folder using GetFolder (works better for MTP)
+            device_folder = device_item.GetFolder
+            if not device_folder:
+                return False, "Could not access device folder"
+
+            # Look for Internal Storage or similar
+            storage_folder = None
+            for item in device_folder.Items():
+                if 'storage' in item.Name.lower():
+                    storage_folder = item.GetFolder
+                    break
+
+            # If no storage subfolder, use device folder directly
+            if not storage_folder:
+                storage_folder = device_folder
+
+            # Navigate to GARMIN folder
+            garmin_folder = None
+            for item in storage_folder.Items():
+                if item.Name.upper() == "GARMIN":
+                    garmin_folder = item.GetFolder
                     break
 
             if not garmin_folder:
-                return False, "Could not find Garmin device in This PC"
-
-            # Navigate to GARMIN folder
-            garmin_main = None
-            for item in garmin_folder.Items():
-                if item.Name.upper() == "GARMIN":
-                    garmin_main = shell.Namespace(item.Path)
-                    break
-
-            if not garmin_main:
                 return False, "Could not find GARMIN folder on device"
 
             # Navigate to or create NewFiles folder
             newfiles_folder = None
-            for item in garmin_main.Items():
+            for item in garmin_folder.Items():
                 if item.Name.upper() == "NEWFILES":
-                    newfiles_folder = shell.Namespace(item.Path)
+                    newfiles_folder = item.GetFolder
                     break
 
             if not newfiles_folder:
                 # Try to create NewFiles folder
-                garmin_main.NewFolder("NewFiles")
-                time.sleep(0.5)
-                for item in garmin_main.Items():
+                garmin_folder.NewFolder("NewFiles")
+                time.sleep(1.0)  # Give MTP time to create folder
+                for item in garmin_folder.Items():
                     if item.Name.upper() == "NEWFILES":
-                        newfiles_folder = shell.Namespace(item.Path)
+                        newfiles_folder = item.GetFolder
                         break
 
             if not newfiles_folder:
@@ -164,7 +180,7 @@ class GarminUploaderWin:
                     # CopyHere flags: 4 = no progress dialog, 16 = yes to all
                     newfiles_folder.CopyHere(filepath, 4 | 16)
                     copied += 1
-                    time.sleep(0.3)  # Small delay between files
+                    time.sleep(0.5)  # Give MTP time between files
                 except Exception as e:
                     print(f"Error copying {filepath}: {e}")
                     continue
