@@ -65,8 +65,9 @@ class GarminUploaderMac:
     def __init__(self, root):
         self.root = root
         self.root.title("Garmin Workout Uploader")
-        self.root.geometry("580x820")
-        self.root.resizable(False, False)
+        self.root.geometry("600x900")
+        self.root.minsize(580, 700)
+        self.root.resizable(True, True)
         
         # Styling
         self.root.configure(bg='#f5f5f7')
