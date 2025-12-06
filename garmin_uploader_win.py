@@ -1,10 +1,19 @@
 #!/usr/bin/env python3
 """Garmin Workout Uploader for Windows"""
 
-import os, sys, shutil, subprocess, re, threading, time, ctypes
+import os, sys, shutil, subprocess, re, threading, time, ctypes, json
 from pathlib import Path
 from tkinter import *
 from tkinter import ttk, filedialog, messagebox
+from urllib.request import urlopen
+from urllib.error import URLError
+
+try:
+    from version import __version__, __app_name__, __github_repo__
+except ImportError:
+    __version__ = "1.0.0"
+    __app_name__ = "Garmin Workout Uploader"
+    __github_repo__ = "supergeri/garmin-usb-mac-app"
 
 try:
     ctypes.windll.shcore.SetProcessDpiAwareness(1)
@@ -30,10 +39,64 @@ try:
 except ImportError:
     WIN32COM_AVAILABLE = False
 
+class UpdateChecker:
+    """Check for app updates from GitHub releases"""
+
+    @staticmethod
+    def check_for_updates():
+        """Check if a new version is available on GitHub"""
+        try:
+            url = f"https://api.github.com/repos/{__github_repo__}/releases/latest"
+            with urlopen(url, timeout=5) as response:
+                data = json.loads(response.read().decode())
+                latest_version = data['tag_name'].lstrip('v')
+                download_url = None
+
+                # Find Windows installer in assets
+                for asset in data.get('assets', []):
+                    if asset['name'].endswith('.exe'):
+                        download_url = asset['browser_download_url']
+                        break
+
+                return {
+                    'available': latest_version > __version__,
+                    'version': latest_version,
+                    'url': download_url or data['html_url'],
+                    'notes': data.get('body', '')
+                }
+        except (URLError, json.JSONDecodeError, KeyError):
+            return None
+
+    @staticmethod
+    def download_update(url, callback=None):
+        """Download the update installer"""
+        try:
+            import tempfile
+            temp_file = os.path.join(tempfile.gettempdir(), 'GarminWorkoutUploaderSetup.exe')
+
+            with urlopen(url, timeout=30) as response:
+                total_size = int(response.headers.get('content-length', 0))
+                downloaded = 0
+
+                with open(temp_file, 'wb') as f:
+                    while True:
+                        chunk = response.read(8192)
+                        if not chunk:
+                            break
+                        f.write(chunk)
+                        downloaded += len(chunk)
+                        if callback and total_size:
+                            callback(downloaded / total_size)
+
+            return temp_file
+        except Exception as e:
+            print(f"Download error: {e}")
+            return None
+
 class GarminUploaderWin:
     def __init__(self, root):
         self.root = root
-        self.root.title("Garmin Workout Uploader")
+        self.root.title(f"{__app_name__} v{__version__}")
         self.root.geometry("580x750")
         self.root.minsize(520, 650)
         self.root.resizable(True, True)
@@ -59,10 +122,72 @@ class GarminUploaderWin:
         self.root.protocol("WM_DELETE_WINDOW", self._on_close)
         self.create_ui()
         self.root.update()
+
+        # Check for updates in background
+        threading.Thread(target=self._check_updates, daemon=True).start()
     
     def _on_close(self):
         self._monitor_running = False
         self.root.destroy()
+
+    def _check_updates(self):
+        """Check for updates in background thread"""
+        time.sleep(2)  # Wait for app to fully load
+        update_info = UpdateChecker.check_for_updates()
+        if update_info and update_info['available']:
+            self.root.after(0, lambda: self._show_update_notification(update_info))
+
+    def _show_update_notification(self, update_info):
+        """Show update notification banner"""
+        update_frame = Frame(self.root, bg='#4CAF50', padx=15, pady=10)
+        update_frame.pack(fill=X, side=TOP)
+
+        Label(update_frame, text=f"🎉 Update Available: v{update_info['version']}",
+              font=('Segoe UI', 11, 'bold'), bg='#4CAF50', fg='white').pack(side=LEFT)
+
+        Button(update_frame, text="Download Update", font=('Segoe UI', 10),
+               bg='white', fg='#4CAF50', relief=FLAT, padx=12, pady=4,
+               command=lambda: self._download_and_install(update_info)).pack(side=RIGHT, padx=(0, 5))
+
+        Button(update_frame, text="View Release Notes", font=('Segoe UI', 10),
+               bg='#45A049', fg='white', relief=FLAT, padx=12, pady=4,
+               command=lambda: subprocess.run(['explorer', update_info['url']])).pack(side=RIGHT)
+
+    def _download_and_install(self, update_info):
+        """Download and install update"""
+        response = messagebox.askyesno(
+            "Download Update",
+            f"Download and install version {update_info['version']}?\n\n"
+            "The installer will open after download. The app will close automatically."
+        )
+
+        if response:
+            # Show progress dialog
+            progress_window = Toplevel(self.root)
+            progress_window.title("Downloading Update")
+            progress_window.geometry("400x100")
+            progress_window.resizable(False, False)
+
+            Label(progress_window, text="Downloading update...", font=('Segoe UI', 11)).pack(pady=10)
+
+            progress_bar = ttk.Progressbar(progress_window, length=350, mode='determinate')
+            progress_bar.pack(pady=10)
+
+            def update_progress(pct):
+                progress_bar['value'] = pct * 100
+                progress_window.update()
+
+            def do_download():
+                installer_path = UpdateChecker.download_update(update_info['url'], update_progress)
+                progress_window.destroy()
+
+                if installer_path:
+                    subprocess.Popen([installer_path])
+                    self.root.quit()
+                else:
+                    messagebox.showerror("Download Failed", "Could not download the update. Please try again.")
+
+            threading.Thread(target=do_download, daemon=True).start()
     
     def detect_garmin_device(self):
         import string

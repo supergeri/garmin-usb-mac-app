@@ -1,0 +1,85 @@
+name: Build Windows Installer
+
+on:
+  push:
+    tags:
+      - 'v*.*.*'
+  workflow_dispatch:
+
+jobs:
+  build:
+    runs-on: windows-latest
+
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+
+    - name: Set up Python
+      uses: actions/setup-python@v5
+      with:
+        python-version: '3.11'
+
+    - name: Install dependencies
+      run: |
+        python -m pip install --upgrade pip
+        pip install -r requirements.txt
+        pip install pyinstaller
+
+    - name: Get version from tag
+      id: get_version
+      shell: bash
+      run: |
+        if [[ "${{ github.ref }}" == refs/tags/* ]]; then
+          echo "VERSION=${GITHUB_REF#refs/tags/v}" >> $GITHUB_OUTPUT
+        else
+          echo "VERSION=0.0.0-dev" >> $GITHUB_OUTPUT
+        fi
+
+    - name: Update version in code
+      shell: bash
+      run: |
+        echo "__version__ = '${{ steps.get_version.outputs.VERSION }}'" > version.py
+
+    - name: Build with PyInstaller
+      run: |
+        $iconArg = if (Test-Path "icon.ico") { "--icon=icon.ico" } else { "" }
+        pyinstaller --name "GarminWorkoutUploader" `
+          --windowed `
+          --onefile `
+          $iconArg `
+          --add-data "version.py;." `
+          garmin_uploader_win.py
+
+    - name: Create installer with Inno Setup
+      run: |
+        choco install innosetup -y
+        & "C:\Program Files (x86)\Inno Setup 6\ISCC.exe" installer.iss
+
+    - name: Upload installer artifact
+      uses: actions/upload-artifact@v4
+      with:
+        name: GarminWorkoutUploader-Windows-Installer
+        path: Output/GarminWorkoutUploaderSetup.exe
+
+    - name: Create Release
+      if: startsWith(github.ref, 'refs/tags/')
+      uses: softprops/action-gh-release@v1
+      with:
+        files: |
+          Output/GarminWorkoutUploaderSetup.exe
+        body: |
+          ## Garmin Workout Uploader v${{ steps.get_version.outputs.VERSION }}
+
+          ### Windows Installer
+          Download and run `GarminWorkoutUploaderSetup.exe` to install.
+
+          ### Features
+          - Upload FIT workout files to Garmin watches
+          - Full workout preview with exercise details
+          - Auto-detection of Garmin devices (MTP and Mass Storage)
+          - Support for both NewFiles and Workouts folders
+
+          ### Auto-Update
+          The app will automatically check for updates on startup.
+      env:
+        GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
