@@ -13,9 +13,19 @@ import struct
 import re
 import threading
 import time
+import json
 from pathlib import Path
 from tkinter import *
 from tkinter import ttk, filedialog, messagebox
+from urllib.request import urlopen
+from urllib.error import URLError
+
+try:
+    from version import __version__, __app_name__, __github_repo__
+except ImportError:
+    __version__ = "1.0.0"
+    __app_name__ = "Garmin Workout Uploader"
+    __github_repo__ = "supergeri/garmin-usb-mac-app"
 
 # Try to import tkinterdnd2 for drag and drop support
 try:
@@ -59,6 +69,34 @@ DURATION_TYPES = {
     12: "repeat_until_power_less_than", 13: "repeat_until_power_greater_than",
     14: "power_less_than", 15: "power_greater_than", 28: "reps"
 }
+
+
+class UpdateChecker:
+    """Check for app updates from GitHub releases"""
+
+    @staticmethod
+    def check_for_updates():
+        """Check if a new version is available on GitHub"""
+        try:
+            url = f"https://api.github.com/repos/{__github_repo__}/releases/latest"
+            with urlopen(url, timeout=5) as response:
+                data = json.loads(response.read().decode())
+                latest_version = data['tag_name'].lstrip('v')
+                download_url = None
+
+                for asset in data.get('assets', []):
+                    if asset['name'].endswith('.dmg') or asset['name'].endswith('.pkg'):
+                        download_url = asset['browser_download_url']
+                        break
+
+                return {
+                    'available': latest_version > __version__,
+                    'version': latest_version,
+                    'url': download_url or data['html_url'],
+                    'notes': data.get('body', '')
+                }
+        except (URLError, json.JSONDecodeError, KeyError):
+            return None
 
 
 class GarminUploaderMac:
