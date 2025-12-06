@@ -23,6 +23,13 @@ try:
 except ImportError:
     FITPARSE_AVAILABLE = False
 
+# Try to import win32com for MTP file transfer
+try:
+    import win32com.client
+    WIN32COM_AVAILABLE = True
+except ImportError:
+    WIN32COM_AVAILABLE = False
+
 class GarminUploaderWin:
     def __init__(self, root):
         self.root = root
@@ -98,7 +105,78 @@ class GarminUploaderWin:
             subprocess.run(['taskkill', '/F', '/IM', 'GarminExpress.exe'], timeout=5, capture_output=True)
         except:
             pass
-    
+
+    def transfer_mtp_files(self, files):
+        """Transfer files to Garmin device via MTP using Windows Shell COM"""
+        if not WIN32COM_AVAILABLE:
+            return False, "pywin32 library not available"
+
+        try:
+            shell = win32com.client.Dispatch("Shell.Application")
+
+            # Find the Garmin device in "This PC"
+            # Namespace 17 = This PC (My Computer)
+            this_pc = shell.Namespace(17)
+            garmin_folder = None
+
+            # Search for Garmin device
+            for item in this_pc.Items():
+                if self.mtp_device_name and self.mtp_device_name.lower() in item.Name.lower():
+                    garmin_folder = shell.Namespace(item.Path)
+                    break
+
+            if not garmin_folder:
+                return False, "Could not find Garmin device in This PC"
+
+            # Navigate to GARMIN folder
+            garmin_main = None
+            for item in garmin_folder.Items():
+                if item.Name.upper() == "GARMIN":
+                    garmin_main = shell.Namespace(item.Path)
+                    break
+
+            if not garmin_main:
+                return False, "Could not find GARMIN folder on device"
+
+            # Navigate to or create NewFiles folder
+            newfiles_folder = None
+            for item in garmin_main.Items():
+                if item.Name.upper() == "NEWFILES":
+                    newfiles_folder = shell.Namespace(item.Path)
+                    break
+
+            if not newfiles_folder:
+                # Try to create NewFiles folder
+                garmin_main.NewFolder("NewFiles")
+                time.sleep(0.5)
+                for item in garmin_main.Items():
+                    if item.Name.upper() == "NEWFILES":
+                        newfiles_folder = shell.Namespace(item.Path)
+                        break
+
+            if not newfiles_folder:
+                return False, "Could not access or create NewFiles folder"
+
+            # Copy files
+            copied = 0
+            for filepath in files:
+                try:
+                    # CopyHere flags: 4 = no progress dialog, 16 = yes to all
+                    newfiles_folder.CopyHere(filepath, 4 | 16)
+                    copied += 1
+                    time.sleep(0.3)  # Small delay between files
+                except Exception as e:
+                    print(f"Error copying {filepath}: {e}")
+                    continue
+
+            if copied > 0:
+                return True, f"{copied} file(s) transferred"
+            else:
+                return False, "No files were copied"
+
+        except Exception as e:
+            return False, f"MTP transfer error: {str(e)}"
+
     def refresh_device_status(self):
         try:
             if not self.device_status.winfo_exists():
@@ -122,7 +200,10 @@ class GarminUploaderWin:
                     self.close_ge_btn.pack(anchor='w', pady=(6, 0))
                 elif device.get('mode') == 'mtp':
                     self.device_status.config(text=f"✅ {device['name']}", fg='#28a745')
-                    self.device_detail.config(text="MTP mode - drag files to transfer")
+                    if WIN32COM_AVAILABLE:
+                        self.device_detail.config(text="MTP mode - automatic transfer enabled")
+                    else:
+                        self.device_detail.config(text="MTP mode - install pywin32 for auto transfer")
                 else:
                     self.device_status.config(text=f"✅ {device['name']}", fg='#28a745')
                     self.device_detail.config(text="Ready for direct transfer")
@@ -736,8 +817,9 @@ class GarminUploaderWin:
         if not device:
             messagebox.showwarning("No Device", "Garmin watch not detected.\n\nMake sure:\n• Watch is connected via USB\n• Watch screen is awake")
             return
-        
+
         if not self.is_mtp and self.garmin_newfiles:
+            # Mass Storage Mode - direct file copy
             if not os.path.exists(self.garmin_newfiles):
                 os.makedirs(self.garmin_newfiles)
             count = 0
@@ -751,7 +833,24 @@ class GarminUploaderWin:
                 self.transfer_btn.config(text="✓ Transferred!", bg='#28a745', state=DISABLED)
                 self.transfer_status.config(text=f"✅ {count} file(s) transferred to Garmin!", fg='#2e7d32')
                 messagebox.showinfo("Success", f"✅ {count} file(s) transferred to your Garmin!\n\nYou can now disconnect your watch.")
+        elif self.is_mtp and WIN32COM_AVAILABLE:
+            # MTP Mode - use COM API for transfer
+            self.transfer_btn.config(text="Transferring...", state=DISABLED)
+            self.transfer_status.config(text="Transferring files via MTP...", fg='#666')
+            self.root.update()
+
+            success, message = self.transfer_mtp_files(self.selected_files)
+
+            if success:
+                self.transfer_btn.config(text="✓ Transferred!", bg='#28a745')
+                self.transfer_status.config(text=f"✅ {message} to Garmin!", fg='#2e7d32')
+                messagebox.showinfo("Success", f"✅ {message} to your Garmin!\n\nYou can now disconnect your watch.")
+            else:
+                self.transfer_btn.config(text="Transfer Files", bg='#007AFF', state=NORMAL)
+                self.transfer_status.config(text=f"❌ {message}", fg='#dc3545')
+                messagebox.showerror("Transfer Failed", f"Could not transfer files via MTP:\n\n{message}\n\nTry reconnecting your watch or using Mass Storage mode.")
         else:
+            # Fallback - stage files for manual drag and drop
             for f in self.staging_folder.glob('*.fit'):
                 f.unlink()
             for f in self.staging_folder.glob('*.FIT'):
@@ -765,7 +864,11 @@ class GarminUploaderWin:
                     pass
             if count:
                 self.transfer_btn.config(text="✓ Files Staged!", bg='#666', state=DISABLED)
-                self.transfer_status.config(text=f"✓ {count} file(s) staged. Drag them to your watch in File Explorer.", fg='#2e7d32')
+                if not WIN32COM_AVAILABLE:
+                    msg = f"✓ {count} file(s) staged. Install pywin32 for automatic MTP transfer, or drag files manually."
+                else:
+                    msg = f"✓ {count} file(s) staged. Drag them to your watch in File Explorer."
+                self.transfer_status.config(text=msg, fg='#2e7d32')
                 subprocess.run(['explorer', str(self.staging_folder)])
                 subprocess.run(['explorer', 'shell:MyComputerFolder'])
 

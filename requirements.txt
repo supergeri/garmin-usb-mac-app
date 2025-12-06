@@ -4,6 +4,9 @@ tkinterdnd2>=0.3.0
 # FIT file parsing for workout preview (optional but recommended)
 fitparse>=1.2.0
 
+# Windows COM API for MTP file transfer (Windows only, optional)
+pywin32>=305; sys_platform == 'win32'
+
 # Tkinter comes bundled with Python on macOS
 
 # For building standalone app (optional):
