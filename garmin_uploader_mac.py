@@ -105,11 +105,39 @@ class UpdateChecker:
         except (URLError, json.JSONDecodeError, KeyError):
             return None
 
+    @staticmethod
+    def download_update(url, callback=None):
+        """Download the update installer"""
+        try:
+            import tempfile
+            # Determine filename from URL
+            filename = url.split('/')[-1] if '/' in url else 'GarminWorkoutUploader.dmg'
+            temp_file = os.path.join(tempfile.gettempdir(), filename)
+
+            with urlopen(url, timeout=60) as response:
+                total_size = int(response.headers.get('content-length', 0))
+                downloaded = 0
+
+                with open(temp_file, 'wb') as f:
+                    while True:
+                        chunk = response.read(8192)
+                        if not chunk:
+                            break
+                        f.write(chunk)
+                        downloaded += len(chunk)
+                        if callback and total_size:
+                            callback(downloaded / total_size)
+
+            return temp_file
+        except Exception as e:
+            print(f"Download error: {e}")
+            return None
+
 
 class GarminUploaderMac:
     def __init__(self, root):
         self.root = root
-        self.root.title("Garmin Workout Uploader")
+        self.root.title(f"{__app_name__} v{__version__}")
         self.root.geometry("580x820")
         self.root.resizable(False, False)
         
@@ -148,12 +176,90 @@ class GarminUploaderMac:
         
         self.create_menu()
         self.create_ui()
+
+        # Check for updates in background
+        threading.Thread(target=self._check_updates, daemon=True).start()
     
     def _on_close(self):
         """Handle window close"""
         self._monitor_running = False
         self.root.destroy()
-    
+
+    def _check_updates(self):
+        """Check for updates in background thread"""
+        time.sleep(2)  # Wait for app to fully load
+        update_info = UpdateChecker.check_for_updates()
+        if update_info and update_info['available']:
+            self.root.after(0, lambda: self._show_update_notification(update_info))
+
+    def _show_update_notification(self, update_info):
+        """Show update notification banner"""
+        update_frame = Frame(self.root, bg='#4CAF50', padx=15, pady=10)
+        update_frame.pack(fill=X, side=TOP, before=self.root.winfo_children()[0])
+
+        Label(update_frame, text=f"Update Available: v{update_info['version']}",
+              font=('SF Pro Text', 11, 'bold'), bg='#4CAF50', fg='white').pack(side=LEFT)
+
+        Button(update_frame, text="Download Update", font=('SF Pro Text', 10),
+               bg='white', fg='#4CAF50', relief=FLAT, padx=12, pady=4,
+               cursor='hand2',
+               command=lambda: self._download_and_install(update_info)).pack(side=RIGHT, padx=(0, 5))
+
+        Button(update_frame, text="View Release Notes", font=('SF Pro Text', 10),
+               bg='#45A049', fg='white', relief=FLAT, padx=12, pady=4,
+               cursor='hand2',
+               command=lambda: webbrowser.open(f"https://github.com/{__github_repo__}/releases/latest")).pack(side=RIGHT)
+
+    def _download_and_install(self, update_info):
+        """Download and install update"""
+        response = messagebox.askyesno(
+            "Download Update",
+            f"Download version {update_info['version']}?\n\n"
+            "The installer will open after download."
+        )
+
+        if response:
+            # Show progress dialog
+            progress_window = Toplevel(self.root)
+            progress_window.title("Downloading Update")
+            progress_window.geometry("400x100")
+            progress_window.resizable(False, False)
+            progress_window.transient(self.root)
+
+            Label(progress_window, text="Downloading update...", font=('SF Pro Text', 11)).pack(pady=10)
+
+            progress_bar = ttk.Progressbar(progress_window, length=350, mode='determinate')
+            progress_bar.pack(pady=10)
+
+            def update_progress(pct):
+                progress_bar['value'] = pct * 100
+                progress_window.update()
+
+            def do_download():
+                installer_path = UpdateChecker.download_update(update_info['url'], update_progress)
+                progress_window.destroy()
+
+                if installer_path:
+                    # On Mac, open the .dmg or .pkg file
+                    subprocess.run(['open', installer_path])
+                    messagebox.showinfo("Download Complete",
+                        f"The installer has been downloaded and opened.\n\n"
+                        f"Please follow the installation instructions to update.")
+                else:
+                    messagebox.showerror("Download Failed", "Could not download the update. Please try again.")
+
+            threading.Thread(target=do_download, daemon=True).start()
+
+    def check_for_updates_manual(self):
+        """Manually check for updates from menu"""
+        update_info = UpdateChecker.check_for_updates()
+        if update_info is None:
+            messagebox.showerror("Error", "Could not check for updates. Please check your internet connection.")
+        elif update_info['available']:
+            self._show_update_notification(update_info)
+        else:
+            messagebox.showinfo("Up to Date", f"You're running the latest version (v{__version__}).")
+
     def check_openmtp(self):
         """Check if OpenMTP is installed"""
         paths = [
@@ -451,9 +557,10 @@ class GarminUploaderMac:
         help_menu = Menu(menubar, tearoff=0)
         menubar.add_cascade(label="Help", menu=help_menu)
         help_menu.add_command(label="How to Use", command=self.show_help)
-        help_menu.add_command(label="Get OpenMTP", 
+        help_menu.add_command(label="Get OpenMTP",
                              command=lambda: webbrowser.open('https://openmtp.ganeshrvel.com'))
         help_menu.add_separator()
+        help_menu.add_command(label="Check for Updates...", command=self.check_for_updates_manual)
         help_menu.add_command(label="About", command=self.show_about)
     
     def create_ui(self):
@@ -943,9 +1050,9 @@ You still need to drag them to OpenMTP."""
     
     def show_about(self):
         """Show about dialog"""
-        messagebox.showinfo("About", 
-            "Garmin Workout Uploader\n\n"
-            "Version 1.0\n\n"
+        messagebox.showinfo("About",
+            f"{__app_name__}\n\n"
+            f"Version {__version__}\n\n"
             "A simple tool to upload .FIT workout files\n"
             "to your Garmin watch via OpenMTP.\n\n"
             "Tools menu powered by GOTOES.org")
