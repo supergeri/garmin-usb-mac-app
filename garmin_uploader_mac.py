@@ -41,6 +41,13 @@ try:
 except ImportError:
     FITPARSE_AVAILABLE = False
 
+# Try to import amakaflow-fitfiletool for workout repair
+try:
+    from amakaflow_fitfiletool import GarminExerciseLookup, build_fit_workout, get_preview_steps, get_fit_metadata
+    FITFILETOOL_AVAILABLE = True
+except ImportError:
+    FITFILETOOL_AVAILABLE = False
+
 # Garmin USB Vendor ID
 GARMIN_VENDOR_ID = "0x091e"
 
@@ -979,15 +986,18 @@ You still need to drag them to OpenMTP."""
         """Show FIT file preview in Garmin watch style"""
         # Parse the FIT file
         workout_data = self.parse_fit_file(filepath)
-        
+
         if not workout_data:
             messagebox.showerror("Error", "Could not parse FIT file. It may be corrupted or not a workout file.")
             return
-        
+
+        # Validate the FIT file for issues
+        validation = self.validate_fit_file(filepath)
+
         # Create preview window
         preview = Toplevel(self.root)
         preview.title(f"Workout Preview - {os.path.basename(filepath)}")
-        preview.geometry("420x650")
+        preview.geometry("420x700" if not validation['valid'] else "420x650")
         preview.configure(bg='#1a1a1a')
         preview.transient(self.root)
         
@@ -1003,9 +1013,41 @@ You still need to drag them to OpenMTP."""
         # Main container with dark theme
         main = Frame(preview, bg='#1a1a1a', padx=20, pady=20)
         main.pack(fill=BOTH, expand=True)
-        
+
+        # Warning banner if validation failed
+        if not validation['valid']:
+            warning_frame = Frame(main, bg='#dc3545', padx=10, pady=8)
+            warning_frame.pack(fill=X, pady=(0, 10))
+
+            Label(warning_frame, text="⚠️ Compatibility Issue Detected",
+                  font=('SF Pro Text', 11, 'bold'), bg='#dc3545', fg='#fff').pack(anchor='w')
+
+            for issue in validation['issues'][:2]:  # Show first 2 issues
+                Label(warning_frame, text=issue, font=('SF Pro Text', 9),
+                      bg='#dc3545', fg='#fff', wraplength=360, justify=LEFT).pack(anchor='w')
+
+            # Repair button if fitfiletool is available
+            if FITFILETOOL_AVAILABLE:
+                def do_repair():
+                    new_file, error = self.repair_fit_file(filepath, workout_data)
+                    if new_file:
+                        messagebox.showinfo("Repaired",
+                            f"Workout repaired and saved to:\n{os.path.basename(new_file)}\n\n"
+                            "The repaired file uses valid exercise categories that work on all Garmin watches.")
+                        # Add repaired file to selection
+                        if new_file not in self.selected_files:
+                            self.selected_files.append(new_file)
+                            self.file_listbox.insert(END, f"  📄 {os.path.basename(new_file)} (repaired)")
+                            self.file_count.config(text=f"{len(self.selected_files)} file(s) selected")
+                    else:
+                        messagebox.showerror("Error", f"Could not repair file:\n{error}")
+
+                Button(warning_frame, text="🔧 Repair Workout", font=('SF Pro Text', 10, 'bold'),
+                       command=do_repair, bg='#fff', fg='#dc3545',
+                       padx=12, pady=4, relief=FLAT, cursor='hand2').pack(anchor='w', pady=(5, 0))
+
         # Watch face simulation (rounded rectangle effect)
-        watch_frame = Frame(main, bg='#000', highlightbackground='#333', 
+        watch_frame = Frame(main, bg='#000', highlightbackground='#333',
                            highlightthickness=2, padx=15, pady=15)
         watch_frame.pack(fill=BOTH, expand=True, pady=(0, 15))
         
@@ -1528,7 +1570,95 @@ You still need to drag them to OpenMTP."""
         else:
             km = meters / 1000
             return f"{km:.1f}km"
-    
+
+    def validate_fit_file(self, filepath):
+        """Validate FIT file for issues that may prevent it from working on Garmin watches.
+        Returns dict with 'valid' boolean and 'issues' list."""
+        if not FITPARSE_AVAILABLE:
+            return {'valid': True, 'issues': [], 'invalid_categories': []}
+
+        try:
+            fitfile = FitFile(filepath)
+            issues = []
+            invalid_categories = []
+
+            # Valid FIT SDK exercise categories are 0-32
+            VALID_CATEGORIES = set(range(33))
+
+            for record in fitfile.get_messages('workout_step'):
+                for field in record.fields:
+                    if field.name == 'exercise_category' and field.value is not None:
+                        # Check if it's a raw number (invalid) vs named category
+                        if isinstance(field.value, int) and field.value not in VALID_CATEGORIES:
+                            invalid_categories.append(field.value)
+
+            if invalid_categories:
+                unique_invalid = list(set(invalid_categories))
+                issues.append(f"Invalid exercise categories found: {unique_invalid}")
+                issues.append("These may cause the workout to not appear on your Garmin watch.")
+
+            return {
+                'valid': len(issues) == 0,
+                'issues': issues,
+                'invalid_categories': list(set(invalid_categories))
+            }
+        except Exception as e:
+            return {'valid': False, 'issues': [f"Error validating file: {str(e)}"], 'invalid_categories': []}
+
+    def repair_fit_file(self, filepath, workout_data):
+        """Repair a FIT file by regenerating it with valid exercise categories.
+        Uses amakaflow-fitfiletool for proper FIT generation."""
+        if not FITFILETOOL_AVAILABLE:
+            return None, "amakaflow-fitfiletool not available"
+
+        try:
+            lookup = GarminExerciseLookup()
+
+            # Convert parsed workout data to fitfiletool format
+            exercises = []
+            for step in workout_data.get('steps', []):
+                name = step.get('name', 'Exercise')
+
+                # Determine reps/duration
+                if step.get('reps'):
+                    reps = step['reps']
+                elif step.get('distance'):
+                    # Convert distance (meters) to string format
+                    dist = step['distance']
+                    if dist >= 1000:
+                        reps = f"{dist/1000:.1f}km"
+                    else:
+                        reps = f"{int(dist)}m"
+                elif step.get('duration'):
+                    reps = f"{int(step['duration'])}s"
+                else:
+                    reps = 10  # Default
+
+                exercises.append({
+                    'name': name,
+                    'reps': reps,
+                    'sets': step.get('sets', 1)
+                })
+
+            workout = {
+                'title': workout_data.get('name', 'Repaired Workout'),
+                'blocks': [{'exercises': exercises, 'rest_between_sec': 0}]
+            }
+
+            # Generate new FIT file
+            fit_bytes = build_fit_workout(workout, use_lap_button=False)
+
+            # Save to new file
+            base, ext = os.path.splitext(filepath)
+            new_filepath = f"{base}_repaired{ext}"
+
+            with open(new_filepath, 'wb') as f:
+                f.write(fit_bytes)
+
+            return new_filepath, None
+        except Exception as e:
+            return None, f"Error repairing file: {str(e)}"
+
     def parse_fit_file(self, filepath):
         """Parse a FIT file and extract workout data"""
         if FITPARSE_AVAILABLE:
