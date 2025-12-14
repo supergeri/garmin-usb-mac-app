@@ -189,7 +189,10 @@ class GarminUploaderMac:
         self._monitor_running = True
         self.transfer_btns_frame = None
         self.openmtp_warning_frame = None
-        
+
+        # Track connected device for model-specific adjustments
+        self.current_device = None
+
         # Handle window close
         self.root.protocol("WM_DELETE_WINDOW", self._on_close)
         
@@ -485,7 +488,10 @@ class GarminUploaderMac:
         
         device = self.detect_garmin_device()
         garmin_express_running = self.check_garmin_express_running()
-        
+
+        # Store detected device for model-specific adjustments
+        self.current_device = device
+
         # Remove any existing close button
         if hasattr(self, 'close_ge_btn') and self.close_ge_btn:
             try:
@@ -1181,11 +1187,12 @@ You still need to drag them to OpenMTP."""
         title = workout_data.get('name', 'Workout')
         Label(watch_frame, text=title, font=('SF Pro Display', 16, 'bold'),
               bg='#000', fg='#fff').pack(pady=(5, 5))
-        
+
         # Sport type badge
         sport = workout_data.get('sport')
         sub_sport = workout_data.get('sub_sport')
         if sport:
+            # Colors for different sport types
             sport_colors = {
                 'running': '#22c55e',
                 'cycling': '#f97316',
@@ -1193,16 +1200,45 @@ You still need to drag them to OpenMTP."""
                 'strength_training': '#ef4444',
                 'training': '#8b5cf6',
                 'walking': '#84cc16',
-                'hiking': '#a3e635'
+                'hiking': '#a3e635',
+                'fitness_equipment': '#06b6d4',  # Cyan for cardio/HIIT
             }
-            sport_display = sub_sport.replace('_', ' ').title() if sub_sport else sport.replace('_', ' ').title()
-            sport_color = sport_colors.get(sport, '#6b7280')
-            
-            sport_badge = Label(watch_frame, text=f"  {sport_display}  ", 
+            # Better display names for sport types
+            sport_display_names = {
+                'fitness_equipment': 'Cardio',
+                'training': 'Strength',
+                'running': 'Running',
+                'cycling': 'Cycling',
+                'swimming': 'Swimming',
+            }
+            sub_sport_display_names = {
+                'strength_training': 'Strength',
+                'generic': None,  # Use sport name instead
+                'cardio_training': 'Cardio',
+                'hiit': 'HIIT',
+            }
+
+            # Determine display name - prefer sub_sport if meaningful
+            if sub_sport and sub_sport in sub_sport_display_names:
+                sport_display = sub_sport_display_names[sub_sport]
+                if sport_display is None:
+                    sport_display = sport_display_names.get(sport, sport.replace('_', ' ').title())
+            elif sub_sport and sub_sport != 'generic':
+                sport_display = sub_sport.replace('_', ' ').title()
+            else:
+                sport_display = sport_display_names.get(sport, sport.replace('_', ' ').title())
+
+            # Use sub_sport color if it's strength training
+            if sub_sport == 'strength_training':
+                sport_color = sport_colors.get('strength_training', '#ef4444')
+            else:
+                sport_color = sport_colors.get(sport, '#6b7280')
+
+            sport_badge = Label(watch_frame, text=f"  {sport_display}  ",
                                font=('SF Pro Text', 10, 'bold'),
                                bg=sport_color, fg='#fff')
             sport_badge.pack(pady=(0, 5))
-        
+
         # Metadata row (source + date)
         meta_frame = Frame(watch_frame, bg='#000')
         meta_frame.pack(fill=X, pady=(0, 10))
@@ -1373,40 +1409,64 @@ You still need to drag them to OpenMTP."""
         # Sport colors
         sport_colors = {
             'running': '#22c55e',
-            'cycling': '#f97316', 
+            'cycling': '#f97316',
             'swimming': '#3b82f6',
             'strength_training': '#ef4444',
             'training': '#8b5cf6',
             'walking': '#84cc16',
-            'hiking': '#a3e635'
+            'hiking': '#a3e635',
+            'fitness_equipment': '#06b6d4',  # Cyan for cardio/HIIT
         }
-        
+
+        sport_display_names = {
+            'fitness_equipment': 'Cardio',
+            'training': 'Strength',
+        }
+
+        sub_sport_display_names = {
+            'strength_training': 'Strength',
+            'generic': None,  # Use sport name instead
+            'cardio_training': 'Cardio',
+            'hiit': 'HIIT',
+        }
+
         # Parse and display each file as a summary row
         for filepath in filepaths:
             workout_data = self.parse_fit_file(filepath)
             if not workout_data:
                 continue
-            
+
             # Card for each workout
             card = Frame(list_frame, bg='#222', highlightbackground='#333', highlightthickness=1)
             card.pack(fill=X, pady=4, padx=(0, 15))
-            
+
             card_content = Frame(card, bg='#222', padx=12, pady=10)
             card_content.pack(fill=X)
-            
+
             # Top row: name + sport badge
             top_row = Frame(card_content, bg='#222')
             top_row.pack(fill=X)
-            
+
             name = workout_data.get('name', os.path.basename(filepath))
             Label(top_row, text=name, font=('SF Pro Text', 13, 'bold'),
                   bg='#222', fg='#fff').pack(side=LEFT)
-            
+
             sport = workout_data.get('sport')
             sub_sport = workout_data.get('sub_sport')
             if sport:
-                sport_display = sub_sport.replace('_', ' ').title() if sub_sport else sport.replace('_', ' ').title()
-                sport_color = sport_colors.get(sport, '#6b7280')
+                # Determine display name based on sub_sport or sport
+                if sub_sport and sub_sport in sub_sport_display_names:
+                    sport_display = sub_sport_display_names[sub_sport]
+                    if sport_display is None:
+                        sport_display = sport_display_names.get(sport, sport.replace('_', ' ').title())
+                else:
+                    sport_display = sport_display_names.get(sport, sport.replace('_', ' ').title())
+
+                # Determine color based on sub_sport or sport
+                if sub_sport == 'strength_training':
+                    sport_color = sport_colors.get('strength_training', '#ef4444')
+                else:
+                    sport_color = sport_colors.get(sport, '#6b7280')
                 Label(top_row, text=f" {sport_display} ", font=('SF Pro Text', 9, 'bold'),
                       bg=sport_color, fg='#fff').pack(side=RIGHT)
             
@@ -1496,16 +1556,39 @@ You still need to drag them to OpenMTP."""
                 'strength_training': '#ef4444',
                 'training': '#8b5cf6',
                 'walking': '#84cc16',
-                'hiking': '#a3e635'
+                'hiking': '#a3e635',
+                'fitness_equipment': '#06b6d4',  # Cyan for cardio/HIIT
             }
-            sport_display = sub_sport.replace('_', ' ').title() if sub_sport else sport.replace('_', ' ').title()
-            sport_color = sport_colors.get(sport, '#6b7280')
-            
-            sport_badge = Label(watch_frame, text=f"  {sport_display}  ", 
+            sport_display_names = {
+                'fitness_equipment': 'Cardio',
+                'training': 'Strength',
+            }
+            sub_sport_display_names = {
+                'strength_training': 'Strength',
+                'generic': None,  # Use sport name instead
+                'cardio_training': 'Cardio',
+                'hiit': 'HIIT',
+            }
+
+            # Determine display name based on sub_sport or sport
+            if sub_sport and sub_sport in sub_sport_display_names:
+                sport_display = sub_sport_display_names[sub_sport]
+                if sport_display is None:
+                    sport_display = sport_display_names.get(sport, sport.replace('_', ' ').title())
+            else:
+                sport_display = sport_display_names.get(sport, sport.replace('_', ' ').title())
+
+            # Determine color based on sub_sport or sport
+            if sub_sport == 'strength_training':
+                sport_color = sport_colors.get('strength_training', '#ef4444')
+            else:
+                sport_color = sport_colors.get(sport, '#6b7280')
+
+            sport_badge = Label(watch_frame, text=f"  {sport_display}  ",
                                font=('SF Pro Text', 10, 'bold'),
                                bg=sport_color, fg='#fff')
             sport_badge.pack(pady=(0, 5))
-        
+
         # Metadata row
         meta_frame = Frame(watch_frame, bg='#000')
         meta_frame.pack(fill=X, pady=(0, 10))

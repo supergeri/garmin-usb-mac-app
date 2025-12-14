@@ -147,7 +147,10 @@ class GarminUploaderWin:
         self.garmin_newfiles = None
         self.is_mtp = False
         self.mtp_device_name = None
-        
+
+        # Track connected device for model-specific adjustments
+        self.current_device = None
+
         self.root.protocol("WM_DELETE_WINDOW", self._on_close)
         self.create_ui()
         self.root.update()
@@ -393,6 +396,10 @@ class GarminUploaderWin:
             return
         device = self.detect_garmin_device()
         ge = self.check_garmin_express()
+
+        # Store detected device for model-specific adjustments
+        self.current_device = device
+
         if self.close_ge_btn:
             try:
                 self.close_ge_btn.destroy()
@@ -601,10 +608,33 @@ class GarminUploaderWin:
                 'strength_training': '#ef4444',
                 'training': '#8b5cf6',
                 'walking': '#84cc16',
-                'hiking': '#a3e635'
+                'hiking': '#a3e635',
+                'fitness_equipment': '#06b6d4',  # Cyan for cardio/HIIT
             }
-            sport_display = sub_sport.replace('_', ' ').title() if sub_sport else sport.replace('_', ' ').title()
-            sport_color = sport_colors.get(sport, '#6b7280')
+            sport_display_names = {
+                'fitness_equipment': 'Cardio',
+                'training': 'Strength',
+            }
+            sub_sport_display_names = {
+                'strength_training': 'Strength',
+                'generic': None,  # Use sport name instead
+                'cardio_training': 'Cardio',
+                'hiit': 'HIIT',
+            }
+
+            # Determine display name based on sub_sport or sport
+            if sub_sport and sub_sport in sub_sport_display_names:
+                sport_display = sub_sport_display_names[sub_sport]
+                if sport_display is None:
+                    sport_display = sport_display_names.get(sport, sport.replace('_', ' ').title())
+            else:
+                sport_display = sport_display_names.get(sport, sport.replace('_', ' ').title())
+
+            # Determine color based on sub_sport or sport
+            if sub_sport == 'strength_training':
+                sport_color = sport_colors.get('strength_training', '#ef4444')
+            else:
+                sport_color = sport_colors.get(sport, '#6b7280')
 
             sport_badge = Label(watch_frame, text=f"  {sport_display}  ",
                                font=('Segoe UI', 10, 'bold'),
