@@ -41,7 +41,11 @@ jobs:
     - name: Update version in code
       shell: bash
       run: |
-        echo "__version__ = '${{ steps.get_version.outputs.VERSION }}'" > version.py
+        echo '"""Version information for Garmin Workout Uploader"""' > version.py
+        echo '' >> version.py
+        echo "__version__ = \"${{ steps.get_version.outputs.VERSION }}\"" >> version.py
+        echo "__app_name__ = \"Garmin Workout Uploader\"" >> version.py
+        echo "__github_repo__ = \"supergeri/garmin-usb-mac-app\"" >> version.py
 
     - name: Build with PyInstaller
       run: |
