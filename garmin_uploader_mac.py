@@ -312,18 +312,53 @@ class GarminUploaderMac:
                     if not app_source:
                         raise Exception("Could not find app in DMG")
 
-                    # Create ~/Applications if it doesn't exist
-                    home_apps = os.path.expanduser('~/Applications')
-                    os.makedirs(home_apps, exist_ok=True)
+                    # Determine where to install - try to install to the same location as current app
+                    current_app_path = None
+                    install_location = "~/Applications"
 
-                    # Install to ~/Applications (no admin needed)
-                    app_dest = os.path.join(home_apps, 'Garmin Workout Uploader.app')
-                    if os.path.exists(app_dest):
-                        subprocess.run(['rm', '-rf', app_dest], check=True)
+                    # In a bundled .app, sys.executable is like:
+                    # /Applications/Garmin Workout Uploader.app/Contents/MacOS/Garmin Workout Uploader
+                    if getattr(sys, 'frozen', False):
+                        exe_path = sys.executable
+                        # Go up to find .app bundle
+                        path = Path(exe_path)
+                        for parent in path.parents:
+                            if parent.suffix == '.app':
+                                current_app_path = str(parent)
+                                break
 
-                    copy_result = subprocess.run(['cp', '-R', app_source, app_dest], capture_output=True, text=True)
-                    if copy_result.returncode != 0:
-                        raise Exception(f"Failed to copy app: {copy_result.stderr}")
+                    # Determine destination
+                    if current_app_path and os.path.exists(current_app_path):
+                        # Install to same location as current app
+                        app_dest = current_app_path
+                        install_location = os.path.dirname(current_app_path)
+                    else:
+                        # Fallback to ~/Applications
+                        home_apps = os.path.expanduser('~/Applications')
+                        os.makedirs(home_apps, exist_ok=True)
+                        app_dest = os.path.join(home_apps, 'Garmin Workout Uploader.app')
+
+                    # Try to remove old app and copy new one
+                    try:
+                        if os.path.exists(app_dest):
+                            subprocess.run(['rm', '-rf', app_dest], check=True)
+
+                        copy_result = subprocess.run(['cp', '-R', app_source, app_dest], capture_output=True, text=True)
+                        if copy_result.returncode != 0:
+                            raise PermissionError(copy_result.stderr)
+                    except (PermissionError, subprocess.CalledProcessError) as perm_err:
+                        # Permission denied - fall back to ~/Applications
+                        home_apps = os.path.expanduser('~/Applications')
+                        os.makedirs(home_apps, exist_ok=True)
+                        app_dest = os.path.join(home_apps, 'Garmin Workout Uploader.app')
+                        install_location = "~/Applications"
+
+                        if os.path.exists(app_dest):
+                            subprocess.run(['rm', '-rf', app_dest], check=True)
+
+                        copy_result = subprocess.run(['cp', '-R', app_source, app_dest], capture_output=True, text=True)
+                        if copy_result.returncode != 0:
+                            raise Exception(f"Failed to copy app: {copy_result.stderr}")
 
                     # Unmount the DMG
                     subprocess.run(['hdiutil', 'detach', mount_point, '-quiet', '-force'])
@@ -332,7 +367,7 @@ class GarminUploaderMac:
                     response = messagebox.askyesno(
                         "Update Installed",
                         f"Version {update_info['version']} has been installed to:\n"
-                        f"~/Applications/\n\n"
+                        f"{install_location}\n\n"
                         f"Restart the app now to use the new version?"
                     )
                     if response:
