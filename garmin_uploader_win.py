@@ -35,26 +35,25 @@ try:
 except ImportError:
     FITPARSE_AVAILABLE = False
 
-# Try to import amakaflow-fitfiletool for workout repair
+# Try to import amakaflow-fitfiletool for workout repair and FIT parsing
 try:
-    from amakaflow_fitfiletool import GarminExerciseLookup, build_fit_workout, get_preview_steps, get_fit_metadata
+    from amakaflow_fitfiletool import (
+        GarminExerciseLookup, build_fit_workout, get_preview_steps, get_fit_metadata,
+        parse_fit_file as fitfiletool_parse_fit_file,
+        validate_fit_file as fitfiletool_validate_fit_file,
+        get_sport_display, get_sport_color, format_duration, format_distance,
+        SPORT_COLORS, SPORT_DISPLAY_NAMES, SUB_SPORT_DISPLAY_NAMES, EXERCISE_CATEGORY_NAMES
+    )
     FITFILETOOL_AVAILABLE = True
 except ImportError:
     FITFILETOOL_AVAILABLE = False
-
-# Import shared display constants
-try:
-    from fit_display import (
-        SPORT_COLORS, SPORT_DISPLAY_NAMES, SUB_SPORT_DISPLAY_NAMES,
-        get_sport_display, get_sport_color, format_duration, format_distance
-    )
-    FIT_DISPLAY_AVAILABLE = True
-except ImportError:
-    FIT_DISPLAY_AVAILABLE = False
     # Fallback definitions
     SPORT_COLORS = {'training': '#8b5cf6', 'fitness_equipment': '#06b6d4'}
+    EXERCISE_CATEGORY_NAMES = {}
     def get_sport_display(sport, sub_sport=None): return sport.replace('_', ' ').title() if sport else 'Workout'
     def get_sport_color(sport, sub_sport=None): return SPORT_COLORS.get(sport, '#6b7280')
+    def fitfiletool_parse_fit_file(filepath): return None
+    def fitfiletool_validate_fit_file(filepath): return {'valid': True, 'issues': [], 'warnings': []}
 
 # Try to import win32com for MTP file transfer
 try:
@@ -853,6 +852,18 @@ class GarminUploaderWin:
 
     def validate_fit_file(self, filepath):
         """Validate FIT file for issues that may prevent it from working on Garmin watches."""
+        # Try fitfiletool's validator first
+        if FITFILETOOL_AVAILABLE:
+            result = fitfiletool_validate_fit_file(filepath)
+            if result:
+                # Convert to expected format if needed
+                return {
+                    'valid': result.get('valid', True),
+                    'issues': result.get('issues', []),
+                    'invalid_categories': result.get('invalid_categories', [])
+                }
+
+        # Fall back to local implementation
         if not FITPARSE_AVAILABLE:
             return {'valid': True, 'issues': [], 'invalid_categories': []}
 
@@ -930,10 +941,16 @@ class GarminUploaderWin:
 
     def parse_fit_file(self, filepath):
         """Parse a FIT file and extract workout data"""
+        # Try fitfiletool's parser first (uses fitparse internally)
+        if FITFILETOOL_AVAILABLE:
+            result = fitfiletool_parse_fit_file(filepath)
+            if result:
+                return result
+        # Fall back to local fitparse implementation
         if FITPARSE_AVAILABLE:
             return self.parse_fit_with_fitparse(filepath)
-        else:
-            return self.parse_fit_basic(filepath)
+        # Last resort: basic binary parsing
+        return self.parse_fit_basic(filepath)
 
     def parse_fit_with_fitparse(self, filepath):
         """Parse FIT file using fitparse library"""
