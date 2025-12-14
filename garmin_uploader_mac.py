@@ -268,8 +268,74 @@ class GarminUploaderMac:
             installer_path = UpdateChecker.download_update(update_info['url'], update_progress)
             progress_window.destroy()
 
-            if installer_path:
-                # On Mac, open the .dmg or .pkg file
+            if installer_path and installer_path.endswith('.dmg'):
+                # Auto-install from DMG
+                try:
+                    # Mount the DMG
+                    mount_result = subprocess.run(
+                        ['hdiutil', 'attach', installer_path, '-nobrowse', '-quiet'],
+                        capture_output=True, text=True
+                    )
+                    if mount_result.returncode != 0:
+                        raise Exception("Failed to mount DMG")
+
+                    # Find the mounted volume
+                    mount_point = None
+                    for line in subprocess.run(['hdiutil', 'info'], capture_output=True, text=True).stdout.split('\n'):
+                        if 'GarminWorkoutUploader' in line or '/Volumes/' in line:
+                            if '/Volumes/' in line:
+                                mount_point = line.split('\t')[-1].strip()
+                                if os.path.exists(mount_point):
+                                    break
+
+                    if not mount_point:
+                        # Try common volume name
+                        for vol in ['/Volumes/Garmin Workout Uploader', '/Volumes/GarminWorkoutUploader']:
+                            if os.path.exists(vol):
+                                mount_point = vol
+                                break
+
+                    if not mount_point:
+                        raise Exception("Could not find mounted volume")
+
+                    # Find the .app in the mounted volume
+                    app_source = None
+                    for item in os.listdir(mount_point):
+                        if item.endswith('.app'):
+                            app_source = os.path.join(mount_point, item)
+                            break
+
+                    if not app_source:
+                        raise Exception("Could not find app in DMG")
+
+                    # Copy to /Applications
+                    app_dest = '/Applications/Garmin Workout Uploader.app'
+                    if os.path.exists(app_dest):
+                        subprocess.run(['rm', '-rf', app_dest])
+                    subprocess.run(['cp', '-R', app_source, app_dest])
+
+                    # Unmount the DMG
+                    subprocess.run(['hdiutil', 'detach', mount_point, '-quiet'])
+
+                    # Ask to restart
+                    response = messagebox.askyesno(
+                        "Update Installed",
+                        f"Version {update_info['version']} has been installed!\n\n"
+                        f"Restart the app now to use the new version?"
+                    )
+                    if response:
+                        # Relaunch the app
+                        subprocess.Popen(['open', app_dest])
+                        self.root.quit()
+
+                except Exception as e:
+                    # Fallback to manual install
+                    subprocess.run(['open', installer_path])
+                    messagebox.showinfo("Download Complete",
+                        f"Auto-install failed. The DMG has been opened.\n\n"
+                        f"Please drag the app to Applications manually.")
+            elif installer_path:
+                # Non-DMG file, open it
                 subprocess.run(['open', installer_path])
                 messagebox.showinfo("Download Complete",
                     f"The installer has been downloaded and opened.\n\n"
