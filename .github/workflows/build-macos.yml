@@ -53,6 +53,7 @@ jobs:
         pyinstaller --name "Garmin Workout Uploader" \
           --windowed \
           --onedir \
+          --hidden-import version \
           --add-data "version.py:." \
           garmin_uploader_mac.py
 

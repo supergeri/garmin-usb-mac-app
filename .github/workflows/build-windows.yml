@@ -50,9 +50,9 @@ jobs:
     - name: Build with PyInstaller
       run: |
         if (Test-Path "icon.ico") {
-          pyinstaller --name "GarminWorkoutUploader" --windowed --onefile --hidden-import=win32timezone --icon=icon.ico --add-data "version.py;." garmin_uploader_win.py
+          pyinstaller --name "GarminWorkoutUploader" --windowed --onefile --hidden-import=win32timezone --hidden-import=version --icon=icon.ico --add-data "version.py;." garmin_uploader_win.py
         } else {
-          pyinstaller --name "GarminWorkoutUploader" --windowed --onefile --hidden-import=win32timezone --add-data "version.py;." garmin_uploader_win.py
+          pyinstaller --name "GarminWorkoutUploader" --windowed --onefile --hidden-import=win32timezone --hidden-import=version --add-data "version.py;." garmin_uploader_win.py
         }
 
     - name: Create installer with Inno Setup
