@@ -7,6 +7,9 @@ fitparse>=1.2.0
 # FIT file generation and validation (for workout repair)
 amakaflow-fitfiletool @ git+https://github.com/supergeri/amakaflow-fitfiletool.git
 
+# SSL certificates for bundled apps (required for update checker)
+certifi
+
 # Windows COM API for MTP file transfer (Windows only, optional)
 pywin32>=305; sys_platform == 'win32'
 

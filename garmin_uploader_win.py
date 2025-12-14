@@ -53,11 +53,25 @@ class UpdateChecker:
     """Check for app updates from GitHub releases"""
 
     @staticmethod
+    def _compare_versions(v1, v2):
+        """Compare two version strings properly (handles 1.0.10 > 1.0.9)"""
+        def parse_version(v):
+            return [int(x) for x in v.split('.')]
+        try:
+            return parse_version(v1) > parse_version(v2)
+        except (ValueError, AttributeError):
+            return v1 > v2
+
+    @staticmethod
     def check_for_updates():
         """Check if a new version is available on GitHub"""
+        import ssl
+        import certifi
         try:
             url = f"https://api.github.com/repos/{__github_repo__}/releases/latest"
-            with urlopen(url, timeout=5) as response:
+            # Create SSL context with certifi certificates for bundled apps
+            ssl_context = ssl.create_default_context(cafile=certifi.where())
+            with urlopen(url, timeout=10, context=ssl_context) as response:
                 data = json.loads(response.read().decode())
                 latest_version = data['tag_name'].lstrip('v')
                 download_url = None
@@ -69,22 +83,27 @@ class UpdateChecker:
                         break
 
                 return {
-                    'available': latest_version > __version__,
+                    'available': UpdateChecker._compare_versions(latest_version, __version__),
                     'version': latest_version,
                     'url': download_url or data['html_url'],
                     'notes': data.get('body', '')
                 }
-        except (URLError, json.JSONDecodeError, KeyError):
+        except Exception as e:
+            print(f"Update check error: {e}")
             return None
 
     @staticmethod
     def download_update(url, callback=None):
         """Download the update installer"""
+        import ssl
+        import certifi
+        import tempfile
         try:
-            import tempfile
             temp_file = os.path.join(tempfile.gettempdir(), 'GarminWorkoutUploaderSetup.exe')
 
-            with urlopen(url, timeout=30) as response:
+            # Create SSL context with certifi certificates for bundled apps
+            ssl_context = ssl.create_default_context(cafile=certifi.where())
+            with urlopen(url, timeout=30, context=ssl_context) as response:
                 total_size = int(response.headers.get('content-length', 0))
                 downloaded = 0
 

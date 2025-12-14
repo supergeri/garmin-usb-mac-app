@@ -54,6 +54,8 @@ jobs:
           --windowed \
           --onedir \
           --hidden-import version \
+          --hidden-import certifi \
+          --collect-data certifi \
           --add-data "version.py:." \
           garmin_uploader_mac.py
 
