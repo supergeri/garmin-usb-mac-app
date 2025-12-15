@@ -543,7 +543,7 @@ class GarminUploaderWin:
             self.show_fit_preview(filepath)
 
     def show_fit_preview(self, filepath):
-        """Show FIT file preview in Garmin watch style"""
+        """Show FIT file preview matching AmakaFlow app style"""
         # Parse the FIT file
         workout_data = self.parse_fit_file(filepath)
 
@@ -557,7 +557,7 @@ class GarminUploaderWin:
         # Create preview window
         preview = Toplevel(self.root)
         preview.title(f"Workout Preview - {os.path.basename(filepath)}")
-        preview.geometry("420x700" if not validation['valid'] else "420x650")
+        preview.geometry("450x750" if not validation['valid'] else "450x700")
         preview.configure(bg='#1a1a1a')
         preview.transient(self.root)
 
@@ -584,7 +584,7 @@ class GarminUploaderWin:
 
             for issue in validation['issues'][:2]:
                 Label(warning_frame, text=issue, font=('Segoe UI', 9),
-                      bg='#dc3545', fg='#fff', wraplength=360, justify=LEFT).pack(anchor='w')
+                      bg='#dc3545', fg='#fff', wraplength=400, justify=LEFT).pack(anchor='w')
 
             if FITFILETOOL_AVAILABLE:
                 def do_repair():
@@ -611,8 +611,8 @@ class GarminUploaderWin:
 
         # Workout title
         title = workout_data.get('name', 'Workout')
-        Label(watch_frame, text=title, font=('Segoe UI', 16, 'bold'),
-              bg='#000', fg='#fff').pack(pady=(5, 5))
+        Label(watch_frame, text=title, font=('Segoe UI', 14, 'bold'),
+              bg='#000', fg='#fff', wraplength=380).pack(pady=(5, 5))
 
         # Sport type badge
         sport = workout_data.get('sport')
@@ -634,11 +634,9 @@ class GarminUploaderWin:
         if workout_data.get('source'):
             meta_parts.append(f"📱 {workout_data['source']}")
         if workout_data.get('created'):
-            # Format date nicely
             created = workout_data['created'].split(' ')[0] if ' ' in workout_data['created'] else workout_data['created']
             meta_parts.append(f"📅 {created}")
 
-        # Calculate total duration
         total_duration = sum(ex.get('duration', 0) for ex in workout_data.get('steps', []))
         if total_duration > 0:
             meta_parts.append(f"⏱ {self.format_duration(total_duration)}")
@@ -648,7 +646,7 @@ class GarminUploaderWin:
                   bg='#000', fg='#666').pack()
 
         # Scrollable exercise list
-        canvas = Canvas(watch_frame, bg='#000', highlightthickness=0, height=350)
+        canvas = Canvas(watch_frame, bg='#000', highlightthickness=0, height=400)
         scrollbar = Scrollbar(watch_frame, orient=VERTICAL, command=canvas.yview)
         exercise_frame = Frame(canvas, bg='#000')
 
@@ -658,7 +656,6 @@ class GarminUploaderWin:
 
         canvas_window = canvas.create_window((0, 0), window=exercise_frame, anchor='nw')
 
-        # Bind canvas resize
         def configure_canvas(event):
             canvas.configure(scrollregion=canvas.bbox('all'))
             canvas.itemconfig(canvas_window, width=event.width)
@@ -666,7 +663,6 @@ class GarminUploaderWin:
         exercise_frame.bind('<Configure>', configure_canvas)
         canvas.bind('<Configure>', lambda e: canvas.itemconfig(canvas_window, width=e.width))
 
-        # Mouse wheel scrolling - scoped to this canvas
         def on_mousewheel(event):
             if canvas.winfo_exists():
                 canvas.yview_scroll(int(-1 * (event.delta / 120)), "units")
@@ -674,198 +670,278 @@ class GarminUploaderWin:
         canvas.bind("<Enter>", lambda e: canvas.bind_all("<MouseWheel>", on_mousewheel))
         canvas.bind("<Leave>", lambda e: canvas.unbind_all("<MouseWheel>"))
 
-        # Display exercises
+        # Process steps to detect repeat structures
         exercises = workout_data.get('steps', [])
-        total_sets = 0
-        rest_count = 0
+        processed_steps = self.process_steps_for_preview(exercises)
 
-        for i, exercise in enumerate(exercises):
-            self.create_exercise_row(exercise_frame, exercise, i, workout_data.get('sport'))
-            total_sets += exercise.get('sets', 1)
-            if exercise.get('is_rest') or exercise.get('step_type') == 'rest':
+        # Stats counters
+        exercise_count = 0
+        rest_count = 0
+        total_sets = 0
+        repeat_count = 0
+
+        # Display processed steps
+        for step_info in processed_steps:
+            step_type = step_info.get('display_type', 'exercise')
+
+            if step_type == 'repeat_header':
+                self.create_repeat_header(exercise_frame, step_info)
+                repeat_count += 1
+                total_sets += step_info.get('repeat_count', 1)
+            elif step_type == 'nested_exercise':
+                self.create_nested_exercise_row(exercise_frame, step_info)
+                exercise_count += 1
+            elif step_type == 'nested_rest':
+                self.create_nested_rest_row(exercise_frame, step_info)
                 rest_count += 1
+            elif step_info.get('is_rest') or step_info.get('step_type') == 'rest':
+                self.create_rest_row(exercise_frame, step_info)
+                rest_count += 1
+            elif step_info.get('step_type') == 'warmup':
+                self.create_warmup_row(exercise_frame, step_info)
+                exercise_count += 1
+            else:
+                self.create_exercise_row(exercise_frame, step_info, exercise_count, sport)
+                exercise_count += 1
+                total_sets += step_info.get('sets', 1)
 
         # Footer stats
         footer = Frame(watch_frame, bg='#000')
         footer.pack(fill=X, pady=(15, 5))
 
-        # Build stats parts
         stats_parts = [f"{len(exercises)} steps"]
-        if total_sets > len(exercises):
+        if exercise_count > 0:
+            stats_parts.append(f"{exercise_count} exercises")
+        if total_sets > exercise_count:
             stats_parts.append(f"{total_sets} total sets")
-        if rest_count > 0:
-            stats_parts.append(f"{rest_count} rest")
 
         Label(footer, text=" • ".join(stats_parts), font=('Segoe UI', 11),
               bg='#000', fg='#666').pack()
 
-        # Legend - different for cardio vs strength
+        # Legend matching app style with icons
         legend_frame = Frame(main, bg='#1a1a1a')
-        legend_frame.pack(fill=X)
-
-        Label(legend_frame, text="Legend:", font=('Segoe UI', 10, 'bold'),
-              bg='#1a1a1a', fg='#888').pack(anchor='w')
+        legend_frame.pack(fill=X, pady=(5, 0))
 
         legend_items = Frame(legend_frame, bg='#1a1a1a')
-        legend_items.pack(fill=X, pady=(5, 0))
+        legend_items.pack(fill=X)
 
-        sport_lower = (sport or '').lower()
-        if sport_lower in ['running', 'cycling', 'swimming', 'walking', 'hiking'] or 'run' in sport_lower:
-            # Cardio legend
-            self.create_legend_badge(legend_items, "Zone/Target", "#3b82f6")
-            self.create_legend_badge(legend_items, "Duration", "#8b5cf6")
-            self.create_legend_badge(legend_items, "Warmup", "#22c55e")
-            self.create_legend_badge(legend_items, "Cooldown", "#6b7280")
-            self.create_legend_badge(legend_items, "Rest", "#f97316")
-        else:
-            # Strength/Cardio legend
-            self.create_legend_badge(legend_items, "Reps", "#3b82f6")
-            self.create_legend_badge(legend_items, "Duration", "#8b5cf6")
-            self.create_legend_badge(legend_items, "Sets", "#22c55e")
-            self.create_legend_badge(legend_items, "Rest", "#f97316")
+        # App-style legend with icons
+        self.create_legend_item(legend_items, "⊙", "Warmup", "#eab308")
+        self.create_legend_item(legend_items, "※", "Warm-Up Set", "#f97316")
+        self.create_legend_item(legend_items, "※", "Exercise", "#fff")
+        self.create_legend_item(legend_items, "↷", "Rest", "#9ca3af")
+        self.create_legend_item(legend_items, "↻", "Repeat", "#3b82f6")
 
         # Close button
         Button(main, text="Close", font=('Segoe UI', 12),
                command=on_close, bg='#333', fg='#fff',
                padx=20, pady=8, relief=FLAT, cursor='hand2').pack(pady=(10, 0))
 
-    def create_exercise_row(self, parent, exercise, index, sport=None):
-        """Create a single exercise row in the preview - Garmin watch style"""
-        sport_lower = (sport or '').lower()
-        is_cardio = sport_lower in ['running', 'cycling', 'swimming', 'walking', 'hiking'] or 'run' in sport_lower
-        step_type = exercise.get('step_type', 'active')
-        is_rest = exercise.get('is_rest', False) or step_type == 'rest'
-        duration_type = exercise.get('duration_type', '')
+    def process_steps_for_preview(self, steps):
+        """Process flat steps list to detect repeat structures for hierarchical display"""
+        processed = []
+        i = 0
 
-        # Different background colors for different step types
-        if step_type == 'warmup':
-            bg_color = '#0a2e1a'  # Dark green tint
-            border_color = '#22c55e'
-            step_icon = '🔥'
-        elif step_type == 'cooldown':
-            bg_color = '#1a1a2e'  # Dark blue tint
-            border_color = '#6b7280'
-            step_icon = '❄️'
-        elif is_rest:
-            bg_color = '#1a1a1a'  # Dark gray for rest
-            border_color = '#f97316'  # Orange border for rest
-            step_icon = '⏸'
+        while i < len(steps):
+            step = steps[i]
+
+            # Check if this step is followed by rest + repeat pattern
+            if i + 2 < len(steps):
+                next_step = steps[i + 1]
+                after_next = steps[i + 2]
+
+                is_rest = next_step.get('is_rest') or next_step.get('step_type') == 'rest'
+                is_repeat = after_next.get('is_repeat', False)
+
+                if is_rest and is_repeat:
+                    repeat_count = after_next.get('repeat_count', 0) + 1
+
+                    processed.append({
+                        'display_type': 'repeat_header',
+                        'repeat_count': repeat_count,
+                        'text': f"{repeat_count} Sets"
+                    })
+
+                    nested_step = step.copy()
+                    nested_step['display_type'] = 'nested_exercise'
+                    processed.append(nested_step)
+
+                    nested_rest = next_step.copy()
+                    nested_rest['display_type'] = 'nested_rest'
+                    processed.append(nested_rest)
+
+                    i += 3
+                    continue
+
+            if step.get('is_repeat', False):
+                i += 1
+                continue
+
+            step_copy = step.copy()
+            step_copy['display_type'] = 'regular'
+            processed.append(step_copy)
+            i += 1
+
+        return processed
+
+    def create_repeat_header(self, parent, step_info):
+        """Create a repeat/sets header row (blue background)"""
+        row = Frame(parent, bg='#3b82f6', padx=10, pady=8)
+        row.pack(fill=X, pady=(8, 2), padx=2)
+
+        Label(row, text=f"↻  {step_info.get('text', 'Sets')}",
+              font=('Segoe UI', 12, 'bold'),
+              bg='#3b82f6', fg='#fff').pack(anchor='w')
+
+    def create_nested_exercise_row(self, parent, exercise):
+        """Create an exercise row nested within a repeat block"""
+        is_warmup_set = exercise.get('is_warmup_set', False)
+        border_color = '#f97316' if is_warmup_set else '#22c55e'
+
+        row = Frame(parent, bg='#111')
+        row.pack(fill=X, pady=1, padx=2)
+
+        border = Frame(row, bg=border_color, width=4)
+        border.pack(side=LEFT, fill=Y)
+
+        content = Frame(row, bg='#111', padx=10, pady=8)
+        content.pack(side=LEFT, fill=BOTH, expand=True)
+
+        name = exercise.get('name', 'Exercise')
+        text_color = '#f97316' if is_warmup_set else '#fff'
+        suffix = " (Warm-Up)" if is_warmup_set else ""
+
+        Label(content, text=f"※  {name}{suffix}", font=('Segoe UI', 11, 'bold'),
+              bg='#111', fg=text_color, anchor='w', wraplength=350).pack(fill=X)
+
+        badges = Frame(content, bg='#111')
+        badges.pack(fill=X, pady=(4, 0))
+
+        if exercise.get('reps'):
+            self.create_badge(badges, f"{exercise['reps']} reps", "#22c55e")
+
+        if exercise.get('duration'):
+            duration_str = self.format_duration(exercise['duration'])
+            self.create_badge(badges, duration_str, "#3b82f6")
+        elif exercise.get('duration_type') == 'open':
+            self.create_badge(badges, "Lap Button", "#6b7280")
+
+        category = exercise.get('category', '')
+        if category:
+            try:
+                cat_id = int(category)
+                cat_name = EXERCISE_CATEGORY_NAMES.get(cat_id, '')
+                if cat_name and cat_name.lower() not in name.lower():
+                    Label(badges, text=cat_name, font=('Segoe UI', 9),
+                          bg='#374151', fg='#d1d5db', padx=6, pady=2).pack(side=LEFT, padx=(0, 5))
+            except (ValueError, TypeError):
+                if category.lower() not in name.lower():
+                    Label(badges, text=category.replace('_', ' ').title(), font=('Segoe UI', 9),
+                          bg='#374151', fg='#d1d5db', padx=6, pady=2).pack(side=LEFT, padx=(0, 5))
+
+    def create_nested_rest_row(self, parent, rest_info):
+        """Create a rest row nested within a repeat block"""
+        row = Frame(parent, bg='#111')
+        row.pack(fill=X, pady=1, padx=2)
+
+        border = Frame(row, bg='#6b7280', width=4)
+        border.pack(side=LEFT, fill=Y)
+
+        content = Frame(row, bg='#111', padx=10, pady=6)
+        content.pack(side=LEFT, fill=BOTH, expand=True)
+
+        Label(content, text="↷  Rest", font=('Segoe UI', 11),
+              bg='#111', fg='#9ca3af', anchor='w').pack(side=LEFT)
+
+        duration_type = rest_info.get('duration_type', '')
+        rest_seconds = rest_info.get('rest_seconds', rest_info.get('duration', 0))
+
+        if duration_type in ('open', 'lap_button') or rest_seconds <= 0:
+            self.create_badge(content, "Lap Button", "#6b7280")
         else:
-            bg_color = '#111'
-            border_color = '#222'
-            step_icon = None
+            self.create_badge(content, f"{int(rest_seconds)}s rest", "#6b7280")
 
-        row = Frame(parent, bg=bg_color, highlightbackground=border_color, highlightthickness=1)
+    def create_rest_row(self, parent, rest_info):
+        """Create a standalone rest row"""
+        row = Frame(parent, bg='#1f2937', padx=10, pady=8)
         row.pack(fill=X, pady=2, padx=2)
 
-        # Main content with step number on left (Garmin style)
-        content = Frame(row, bg=bg_color)
+        Label(row, text="↷  Rest", font=('Segoe UI', 11, 'bold'),
+              bg='#1f2937', fg='#9ca3af', anchor='w').pack(side=LEFT)
+
+        duration_type = rest_info.get('duration_type', '')
+        rest_seconds = rest_info.get('rest_seconds', rest_info.get('duration', 0))
+
+        if duration_type in ('open', 'lap_button') or rest_seconds <= 0:
+            self.create_badge(row, "Lap Button", "#f97316")
+        else:
+            self.create_badge(row, f"{int(rest_seconds)}s", "#f97316")
+
+    def create_warmup_row(self, parent, warmup_info):
+        """Create a warmup row with timer icon"""
+        row = Frame(parent, bg='#1c1917', highlightbackground='#eab308',
+                   highlightthickness=1, padx=10, pady=8)
+        row.pack(fill=X, pady=2, padx=2)
+
+        content = Frame(row, bg='#1c1917')
         content.pack(fill=X)
 
-        # Step number circle (Garmin watch style)
-        step_num_frame = Frame(content, bg=bg_color, width=40)
-        step_num_frame.pack(side=LEFT, padx=(8, 0), pady=8)
-        step_num_frame.pack_propagate(False)
+        name = warmup_info.get('name', 'Warmup')
+        Label(content, text=f"⊙  {name}", font=('Segoe UI', 11, 'bold'),
+              bg='#1c1917', fg='#eab308', anchor='w', wraplength=350).pack(fill=X)
 
-        step_num_color = '#f97316' if is_rest else '#3b82f6'
-        Label(step_num_frame, text=str(index + 1), font=('Segoe UI', 11, 'bold'),
-              bg=step_num_color, fg='#fff', width=3, pady=2).pack(expand=True)
+        badges = Frame(content, bg='#1c1917')
+        badges.pack(fill=X, pady=(4, 0))
 
-        # Exercise details
-        details = Frame(content, bg=bg_color, padx=8, pady=8)
-        details.pack(side=LEFT, fill=BOTH, expand=True)
+        duration = warmup_info.get('duration', 0)
+        duration_type = warmup_info.get('duration_type', '')
 
-        # For rest steps, show special display
-        if is_rest:
-            # Rest header with icon
-            name = exercise.get('name', 'Rest')
-            if name.lower() == 'rest' or not name:
-                name = 'Rest'
-            Label(details, text=f"{step_icon} {name}", font=('Segoe UI', 12, 'bold'),
-                  bg=bg_color, fg='#f97316', anchor='w').pack(fill=X)
+        if duration > 0:
+            duration_str = self.format_duration(duration)
+            self.create_badge(badges, duration_str, "#3b82f6")
+        elif duration_type in ('open', 5):
+            self.create_badge(badges, "Press Lap", "#6b7280")
 
-            # Rest duration or "Press Lap"
-            badges = Frame(details, bg=bg_color)
-            badges.pack(fill=X, pady=(5, 0))
+    def create_exercise_row(self, parent, exercise, index, sport=None):
+        """Create a standalone exercise row (not nested in repeat)"""
+        bg_color = '#111'
+        name = exercise.get('name', f'Exercise {index + 1}')
+        duration_type = exercise.get('duration_type', '')
 
-            if duration_type == 'open':
-                self.create_badge(badges, "Press Lap", "#f97316")
-            elif exercise.get('duration'):
-                duration_str = self.format_duration(exercise['duration'])
-                self.create_badge(badges, duration_str, "#f97316")
-            elif duration_type == 'time' and exercise.get('duration_value'):
-                duration_str = self.format_duration(exercise['duration_value'] / 1000)  # ms to seconds
-                self.create_badge(badges, duration_str, "#f97316")
-            else:
-                self.create_badge(badges, "Press Lap", "#f97316")
-        else:
-            # Exercise name with optional step type icon
-            name = exercise.get('name', f'Exercise {index + 1}')
-            display_name = f"{step_icon} {name}" if step_icon else name
-            Label(details, text=display_name, font=('Segoe UI', 12, 'bold'),
-                  bg=bg_color, fg='#fff', anchor='w').pack(fill=X)
+        row = Frame(parent, bg=bg_color, padx=10, pady=8)
+        row.pack(fill=X, pady=2, padx=2)
 
-            # Badges row
-            badges = Frame(details, bg=bg_color)
-            badges.pack(fill=X, pady=(5, 0))
+        Label(row, text=f"※  {name}", font=('Segoe UI', 11, 'bold'),
+              bg=bg_color, fg='#fff', anchor='w', wraplength=350).pack(fill=X)
 
-            if is_cardio:
-                # Zone badge (blue) for cardio
-                zone = exercise.get('zone')
-                if zone:
-                    self.create_badge(badges, zone, "#3b82f6")
+        badges = Frame(row, bg=bg_color)
+        badges.pack(fill=X, pady=(4, 0))
 
-                # Duration badge (purple)
-                if exercise.get('duration'):
-                    duration_str = self.format_duration(exercise['duration'])
-                    self.create_badge(badges, duration_str, "#8b5cf6")
-                elif duration_type == 'open':
-                    self.create_badge(badges, "Press Lap", "#8b5cf6")
+        if exercise.get('reps'):
+            self.create_badge(badges, f"{exercise['reps']} reps", "#22c55e")
 
-                # Distance badge (green) for cardio
-                if exercise.get('distance'):
-                    dist_str = self.format_distance(exercise['distance'])
-                    self.create_badge(badges, dist_str, "#22c55e")
+        if exercise.get('duration'):
+            duration_str = self.format_duration(exercise['duration'])
+            self.create_badge(badges, duration_str, "#3b82f6")
+        elif duration_type == 'open':
+            self.create_badge(badges, "Lap Button", "#6b7280")
 
-                # Step type indicator
-                if step_type == 'warmup':
-                    Label(badges, text="Warm Up", font=('Segoe UI', 9),
-                          bg='#22c55e', fg='#fff', padx=6, pady=2).pack(side=LEFT, padx=(5, 0))
-                elif step_type == 'cooldown':
-                    Label(badges, text="Cool Down", font=('Segoe UI', 9),
-                          bg='#6b7280', fg='#fff', padx=6, pady=2).pack(side=LEFT, padx=(5, 0))
-            else:
-                # Strength/cardio workout badges
-                # Reps badge (blue)
-                if exercise.get('reps'):
-                    self.create_badge(badges, f"{exercise['reps']} reps", "#3b82f6")
+        sets = exercise.get('sets', 1)
+        if sets > 1:
+            self.create_badge(badges, f"{sets} sets", "#22c55e")
 
-                # Duration badge (purple) or Press Lap
-                if exercise.get('duration'):
-                    duration_str = self.format_duration(exercise['duration'])
-                    self.create_badge(badges, duration_str, "#8b5cf6")
-                elif duration_type == 'open':
-                    self.create_badge(badges, "Press Lap", "#8b5cf6")
-
-                # Distance badge (green)
-                if exercise.get('distance'):
-                    dist_str = self.format_distance(exercise['distance'])
-                    self.create_badge(badges, dist_str, "#22c55e")
-
-                # Sets badge (green, only if > 1)
-                sets = exercise.get('sets', 1)
-                if sets > 1:
-                    self.create_badge(badges, f"{sets} sets", "#22c55e")
-
-                # Weight badge (orange)
-                if exercise.get('weight'):
-                    self.create_badge(badges, exercise['weight'], "#f97316")
-
-                # Category badge (gray)
-                category = exercise.get('category', '')
-                if category and category not in name.lower():
+        category = exercise.get('category', '')
+        if category:
+            try:
+                cat_id = int(category)
+                cat_name = EXERCISE_CATEGORY_NAMES.get(cat_id, '')
+                if cat_name and cat_name.lower() not in name.lower():
+                    Label(badges, text=cat_name, font=('Segoe UI', 9),
+                          bg='#374151', fg='#d1d5db', padx=6, pady=2).pack(side=LEFT, padx=(0, 5))
+            except (ValueError, TypeError):
+                if category.lower() not in name.lower():
                     Label(badges, text=category.replace('_', ' ').title(), font=('Segoe UI', 9),
-                          bg='#333', fg='#999', padx=6, pady=2).pack(side=LEFT, padx=(5, 0))
+                          bg='#374151', fg='#d1d5db', padx=6, pady=2).pack(side=LEFT, padx=(0, 5))
 
     def create_badge(self, parent, text, color):
         """Create a colored badge"""
@@ -873,8 +949,16 @@ class GarminUploaderWin:
                      bg=color, fg='#fff', padx=8, pady=2)
         badge.pack(side=LEFT, padx=(0, 5))
 
+    def create_legend_item(self, parent, icon, text, color):
+        """Create a legend item with icon matching app style"""
+        item = Frame(parent, bg='#1a1a1a')
+        item.pack(side=LEFT, padx=(0, 12))
+
+        Label(item, text=icon, font=('Segoe UI', 10), bg='#1a1a1a', fg=color).pack(side=LEFT)
+        Label(item, text=f" {text}", font=('Segoe UI', 9), bg='#1a1a1a', fg='#888').pack(side=LEFT)
+
     def create_legend_badge(self, parent, text, color):
-        """Create a legend badge"""
+        """Create a legend badge (legacy)"""
         item = Frame(parent, bg='#1a1a1a')
         item.pack(side=LEFT, padx=(0, 15))
 
