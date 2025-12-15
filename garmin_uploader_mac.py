@@ -2231,22 +2231,43 @@ You still need to drag them to OpenMTP."""
             is_cardio = sport_lower in cardio_sports or sub_sport_lower in cardio_sports or 'run' in sport_lower or 'run' in sub_sport_lower
             
             # Third pass: process steps
+            # Keep rest and repeat steps as separate entries for grouped display
             exercises = []
             i = 0
             while i < len(steps_raw):
                 step = steps_raw[i]
-                
-                # Handle repeat markers for strength workouts
+
+                # Handle repeat markers - keep as separate step for grouped display
                 if step.get('is_repeat'):
+                    repeat_step = {
+                        'is_repeat': True,
+                        'repeat_count': step.get('repeat_count', 0),
+                        'name': f"{step.get('repeat_count', 0) + 1} Sets",
+                        'step_type': 'repeat'
+                    }
+                    # Also update previous exercise's sets for badge display
                     if exercises and step.get('repeat_count'):
-                        exercises[-1]['sets'] = step['repeat_count'] + 1
+                        for ex in reversed(exercises):
+                            if not ex.get('is_rest') and not ex.get('is_repeat'):
+                                ex['sets'] = step['repeat_count'] + 1
+                                break
+                    exercises.append(repeat_step)
                     i += 1
                     continue
-                
-                # For strength workouts, skip pure rest steps
-                if not is_cardio and step.get('is_rest'):
-                    if exercises and step.get('duration'):
-                        exercises[-1]['rest'] = step['duration']
+
+                # Handle rest steps - keep as separate entries for grouped display
+                if step.get('is_rest'):
+                    rest_step = {
+                        'is_rest': True,
+                        'step_type': 'rest',
+                        'name': 'Rest',
+                        'duration_type': step.get('duration_type', 'time'),
+                        'rest_seconds': step.get('duration', 0),
+                        'duration': step.get('duration', 0)
+                    }
+                    if step.get('duration_type') in ('open', 'repeat_until_steps_cmplt'):
+                        rest_step['duration_type'] = 'open'
+                    exercises.append(rest_step)
                     i += 1
                     continue
                 
