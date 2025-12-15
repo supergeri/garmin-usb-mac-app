@@ -1577,21 +1577,22 @@ You still need to drag them to OpenMTP."""
         return processed
 
     def create_repeat_header(self, parent, step_info):
-        """Create a repeat/sets header row (blue background)"""
-        row = Frame(parent, bg='#3b82f6', padx=10, pady=8)
+        """Create a repeat/sets header row (green background like web app)"""
+        row = Frame(parent, bg='#166534', padx=10, pady=8)  # Dark green to match web rgba(34, 197, 94, 0.2)
         row.pack(fill=X, pady=(8, 2), padx=2)
 
         Label(row, text=f"↻  {step_info.get('text', 'Sets')}",
               font=('SF Pro Text', 12, 'bold'),
-              bg='#3b82f6', fg='#fff').pack(anchor='w')
+              bg='#166534', fg='#4ade80').pack(anchor='w')  # Green text like web #4ade80
 
     def create_nested_exercise_row(self, parent, exercise):
         """Create an exercise row nested within a repeat block"""
-        # Container with left border to show nesting
+        # Container with left border to show nesting (blue for regular, orange for warmup)
         is_warmup_set = exercise.get('is_warmup_set', False)
-        border_color = '#f97316' if is_warmup_set else '#22c55e'  # Orange for warmup, green for regular
+        border_color = '#f97316' if is_warmup_set else '#3b82f6'  # Orange for warmup, blue for regular
+        bg_color = '#1a1520' if is_warmup_set else '#111827'  # Subtle background tint
 
-        row = Frame(parent, bg='#111')
+        row = Frame(parent, bg=bg_color)
         row.pack(fill=X, pady=1, padx=2)
 
         # Left border indicator
@@ -1599,22 +1600,22 @@ You still need to drag them to OpenMTP."""
         border.pack(side=LEFT, fill=Y)
 
         # Content
-        content = Frame(row, bg='#111', padx=10, pady=8)
+        content = Frame(row, bg=bg_color, padx=10, pady=8)
         content.pack(side=LEFT, fill=BOTH, expand=True)
 
         # Exercise name with icon
         name = exercise.get('name', 'Exercise')
-        text_color = '#f97316' if is_warmup_set else '#fff'
+        text_color = '#fbbf24' if is_warmup_set else '#93c5fd'  # Matching web colors
         suffix = " (Warm-Up)" if is_warmup_set else ""
 
         Label(content, text=f"※  {name}{suffix}", font=('SF Pro Text', 11, 'bold'),
-              bg='#111', fg=text_color, anchor='w', wraplength=350).pack(fill=X)
+              bg=bg_color, fg=text_color, anchor='w', wraplength=420).pack(fill=X)
 
         # Badges row
-        badges = Frame(content, bg='#111')
+        badges = Frame(content, bg=bg_color)
         badges.pack(fill=X, pady=(4, 0))
 
-        # Reps badge (green)
+        # Reps badge (green for reps)
         if exercise.get('reps'):
             self.create_badge(badges, f"{exercise['reps']} reps", "#22c55e")
 
@@ -1696,7 +1697,7 @@ You still need to drag them to OpenMTP."""
         # Warmup label with timer icon (yellow/gold)
         name = warmup_info.get('name', 'Warmup')
         Label(content, text=f"⊙  {name}", font=('SF Pro Text', 11, 'bold'),
-              bg='#1c1917', fg='#eab308', anchor='w', wraplength=350).pack(fill=X)
+              bg='#1c1917', fg='#eab308', anchor='w', wraplength=420).pack(fill=X)
 
         # Duration badge
         badges = Frame(content, bg='#1c1917')
@@ -1981,7 +1982,7 @@ You still need to drag them to OpenMTP."""
 
         # Exercise name with icon
         Label(row, text=f"※  {name}", font=('SF Pro Text', 11, 'bold'),
-              bg=bg_color, fg='#fff', anchor='w', wraplength=350).pack(fill=X)
+              bg=bg_color, fg='#fff', anchor='w', wraplength=420).pack(fill=X)
 
         # Badges row
         badges = Frame(row, bg=bg_color)
@@ -2233,7 +2234,19 @@ You still need to drag them to OpenMTP."""
                     elif field.name == 'exercise_name':
                         step['exercise_id'] = field.value
                     elif field.name == 'duration_type':
-                        step['duration_type'] = str(field.value)
+                        dtype_str = str(field.value) if field.value else ''
+                        step['duration_type'] = dtype_str
+                        # FIT SDK: repeat types indicate this is a repeat step
+                        # repeat_until_steps_cmplt=6, repeat_until_time=7, etc.
+                        if 'repeat' in dtype_str.lower() or dtype_str in ('6', '7', '8', '9'):
+                            step['is_repeat'] = True
+                    elif field.name == 'duration_step' and field.value is not None:
+                        # This is which step to repeat back to (for repeat steps)
+                        step['duration_step'] = int(field.value)
+                    elif field.name == 'duration_value' and field.value is not None:
+                        # For repeat steps, this is the repeat count
+                        if step.get('is_repeat'):
+                            step['repeat_count'] = int(field.value)
                     elif field.name == 'duration_reps' and field.value:
                         step['reps'] = int(field.value)
                     elif field.name == 'duration_time' and field.value:
@@ -2241,10 +2254,15 @@ You still need to drag them to OpenMTP."""
                     elif field.name == 'duration_distance' and field.value:
                         step['distance'] = float(field.value)
                     elif field.name == 'intensity':
-                        intensity = str(field.value) if field.value else None
+                        intensity_raw = field.value
+                        intensity = str(intensity_raw) if intensity_raw is not None else None
                         step['intensity'] = intensity
-                        if intensity == 'rest':
+                        # FIT SDK intensity: 0=active, 1=rest, 2=warmup, 3=cooldown
+                        # fitparse may return string or numeric
+                        if intensity in ('rest', '1', 1):
                             step['is_rest'] = True
+                        elif intensity in ('warmup', '2', 2):
+                            step['is_warmup'] = True
                     elif field.name == 'repeat_steps' and field.value:
                         step['is_repeat'] = True
                         step['repeat_count'] = int(field.value)
@@ -2300,14 +2318,30 @@ You still need to drag them to OpenMTP."""
                         'name': 'Rest',
                         'duration_type': step.get('duration_type', 'time'),
                         'rest_seconds': step.get('duration', 0),
-                        'duration': step.get('duration', 0)
+                        'duration': step.get('duration', 0),
+                        'category': step.get('category')
                     }
                     if step.get('duration_type') in ('open', 'repeat_until_steps_cmplt'):
                         rest_step['duration_type'] = 'open'
                     exercises.append(rest_step)
                     i += 1
                     continue
-                
+
+                # Handle warmup steps - keep as separate entries
+                if step.get('is_warmup'):
+                    warmup_step = {
+                        'step_type': 'warmup',
+                        'name': step.get('name') or 'Warm-Up',
+                        'duration_type': step.get('duration_type', 'time'),
+                        'duration': step.get('duration', 0),
+                        'category': step.get('category')
+                    }
+                    if step.get('duration_type') in ('open', 'repeat_until_steps_cmplt'):
+                        warmup_step['duration_type'] = 'open'
+                    exercises.append(warmup_step)
+                    i += 1
+                    continue
+
                 exercise = {}
                 cat = step.get('category')
                 ex_id = step.get('exercise_id')
@@ -2318,17 +2352,18 @@ You still need to drag them to OpenMTP."""
                 if is_cardio:
                     # For cardio workouts, use intensity + notes
                     sport_name = workout_data.get('sport', 'exercise').title()
-                    
-                    if intensity == 'warmup':
+
+                    # FIT SDK intensity: 0=active, 1=rest, 2=warmup, 3=cooldown
+                    if intensity in ('warmup', '2', 2):
                         exercise['name'] = 'Warm Up'
                         exercise['step_type'] = 'warmup'
-                    elif intensity == 'cooldown':
+                    elif intensity in ('cooldown', '3', 3):
                         exercise['name'] = 'Cool Down'
                         exercise['step_type'] = 'cooldown'
-                    elif intensity == 'rest':
+                    elif intensity in ('rest', '1', 1):
                         exercise['name'] = 'Recovery'
                         exercise['step_type'] = 'rest'
-                    elif intensity == 'active':
+                    elif intensity in ('active', '0', 0):
                         exercise['name'] = notes if notes else sport_name
                         exercise['step_type'] = 'active'
                     else:
@@ -2370,7 +2405,8 @@ You still need to drag them to OpenMTP."""
                 
                 exercise['sets'] = 1
                 exercise['type'] = cat.replace('_', ' ').title() if cat else ''
-                
+                exercise['category'] = cat  # Keep original category for display lookup
+
                 exercises.append(exercise)
                 i += 1
             
