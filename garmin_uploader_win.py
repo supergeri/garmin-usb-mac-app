@@ -754,7 +754,7 @@ class GarminUploaderWin:
                 is_repeat = after_next.get('is_repeat', False)
 
                 if is_rest and is_repeat:
-                    repeat_count = after_next.get('repeat_count', 0) + 1
+                    repeat_count = after_next.get('repeat_count', 0)
 
                     processed.append({
                         'display_type': 'repeat_header',
@@ -1193,7 +1193,7 @@ class GarminUploaderWin:
                 # Handle repeat markers for strength workouts
                 if step.get('is_repeat'):
                     if exercises and step.get('repeat_count'):
-                        exercises[-1]['sets'] = step['repeat_count'] + 1
+                        exercises[-1]['sets'] = step['repeat_count']
                     i += 1
                     continue
 

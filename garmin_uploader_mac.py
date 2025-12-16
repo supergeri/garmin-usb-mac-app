@@ -1565,7 +1565,7 @@ You still need to drag them to OpenMTP."""
                 is_repeat = after_next.get('is_repeat', False)
 
                 if is_rest and is_repeat:
-                    repeat_count = after_next.get('repeat_count', 0) + 1
+                    repeat_count = after_next.get('repeat_count', 0)
 
                     processed.append({
                         'display_type': 'repeat_header',
@@ -2352,14 +2352,14 @@ You still need to drag them to OpenMTP."""
                     repeat_step = {
                         'is_repeat': True,
                         'repeat_count': step.get('repeat_count', 0),
-                        'name': f"{step.get('repeat_count', 0) + 1} Sets",
+                        'name': f"{step.get('repeat_count', 0)} Sets",
                         'step_type': 'repeat'
                     }
                     # Also update previous exercise's sets for badge display
                     if exercises and step.get('repeat_count'):
                         for ex in reversed(exercises):
                             if not ex.get('is_rest') and not ex.get('is_repeat'):
-                                ex['sets'] = step['repeat_count'] + 1
+                                ex['sets'] = step['repeat_count']
                                 break
                     exercises.append(repeat_step)
                     i += 1
