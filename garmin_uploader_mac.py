@@ -176,7 +176,7 @@ class GarminUploaderMac:
     def __init__(self, root):
         self.root = root
         self.root.title(f"{__app_name__} v{__version__}")
-        self.root.geometry("580x820")
+        self.root.geometry("580x950")
         self.root.resizable(False, False)
         
         # Styling
@@ -211,6 +211,11 @@ class GarminUploaderMac:
 
         # Track connected device for model-specific adjustments
         self.current_device = None
+
+        # Connect IQ app installation
+        self.selected_prg_file = None
+        self.prg_build_folder = Path.home() / "dev" / "amakaflow-garmin-app" / "bin"
+        self.garmin_mount = None
 
         # Handle window close
         self.root.protocol("WM_DELETE_WINDOW", self._on_close)
@@ -812,7 +817,10 @@ class GarminUploaderMac:
         
         # Step 3: Transfer Files
         self.create_step(main, "3", "Transfer to Watch", self.create_transfer_section)
-        
+
+        # Step 4: Connect IQ App Installation
+        self.create_step(main, "4", "Install Connect IQ App", self.create_connectiq_section)
+
         # Help link
         help_frame = Frame(main, bg='#f5f5f7')
         help_frame.pack(fill=X, pady=(15, 0))
@@ -2528,6 +2536,197 @@ You still need to drag them to OpenMTP."""
         except Exception as e:
             # Silently return None for invalid files
             return None
+
+
+    # =========================================================================
+    # Connect IQ App Installation Methods
+    # =========================================================================
+
+    def create_connectiq_section(self, parent):
+        """Step 4: Connect IQ app installation"""
+        self.connectiq_frame = parent
+
+        # Description
+        Label(parent, text="Install .PRG files (Connect IQ apps) directly to your Garmin",
+              font=('SF Pro Text', 11), bg='#fff', fg='#666').pack(anchor=W)
+
+        # File selection row
+        file_row = Frame(parent, bg='#fff')
+        file_row.pack(fill=X, pady=(10, 0))
+
+        self.prg_file_label = Label(file_row, text="No file selected",
+                                    font=('SF Pro Text', 11), bg='#f8f8f8',
+                                    fg='#666', padx=10, pady=6, anchor=W)
+        self.prg_file_label.pack(side=LEFT, fill=X, expand=True)
+
+        Button(file_row, text="Browse...", font=('SF Pro Text', 11),
+               command=self.browse_prg_file, padx=10, pady=4,
+               relief=FLAT, cursor='hand2').pack(side=RIGHT, padx=(8, 0))
+
+        # Auto-detect from build folder
+        if self.prg_build_folder.exists():
+            prg_files = list(self.prg_build_folder.glob("*.prg"))
+            if prg_files:
+                # Use most recent .prg file
+                latest_prg = max(prg_files, key=lambda p: p.stat().st_mtime)
+                self.selected_prg_file = latest_prg
+                self.prg_file_label.config(text=f"📦 {latest_prg.name}", fg='#333')
+
+        # Mount status row
+        mount_row = Frame(parent, bg='#fff')
+        mount_row.pack(fill=X, pady=(10, 0))
+
+        self.mount_status_label = Label(mount_row, text="🔍 Checking for Garmin mount...",
+                                        font=('SF Pro Text', 11), bg='#fff', fg='#666')
+        self.mount_status_label.pack(side=LEFT)
+
+        Button(mount_row, text="↻", font=('SF Pro Text', 12),
+               command=self.refresh_garmin_mount, padx=6, pady=2,
+               relief=FLAT, cursor='hand2').pack(side=RIGHT)
+
+        # Install button
+        btn_row = Frame(parent, bg='#fff')
+        btn_row.pack(fill=X, pady=(10, 0))
+
+        self.install_prg_btn = Button(btn_row, text="Install to Watch",
+                                      font=('SF Pro Text', 12, 'bold'),
+                                      bg='#007AFF', fg='white',
+                                      command=self.install_prg_file,
+                                      padx=20, pady=8, relief=FLAT,
+                                      cursor='hand2', state=DISABLED)
+        self.install_prg_btn.pack(side=LEFT)
+
+        self.install_status_label = Label(btn_row, text="",
+                                          font=('SF Pro Text', 11), bg='#fff', fg='#666')
+        self.install_status_label.pack(side=LEFT, padx=(10, 0))
+
+        # Check for Garmin mount
+        self.root.after(500, self.refresh_garmin_mount)
+
+    def browse_prg_file(self):
+        """Open file dialog to select a .PRG file"""
+        initial_dir = str(self.prg_build_folder) if self.prg_build_folder.exists() else str(Path.home())
+
+        filepath = filedialog.askopenfilename(
+            title="Select Connect IQ App",
+            initialdir=initial_dir,
+            filetypes=[("Connect IQ Apps", "*.prg *.PRG"), ("All files", "*.*")]
+        )
+
+        if filepath:
+            self.selected_prg_file = Path(filepath)
+            self.prg_file_label.config(text=f"📦 {self.selected_prg_file.name}", fg='#333')
+            self.refresh_garmin_mount()
+
+    def find_garmin_mount(self):
+        """Find mounted Garmin device volume with GARMIN/APPS folder"""
+        volumes_path = Path("/Volumes")
+
+        if not volumes_path.exists():
+            return None
+
+        # Common Garmin volume patterns
+        garmin_patterns = [
+            'GARMIN', 'FENIX', 'FORERUNNER', 'VENU', 'VIVOACTIVE',
+            'INSTINCT', 'EPIX', 'ENDURO', 'MARQ', 'EDGE', 'APPROACH'
+        ]
+
+        for volume in volumes_path.iterdir():
+            if not volume.is_dir():
+                continue
+
+            volume_name = volume.name.upper()
+
+            # Check if volume name matches Garmin patterns
+            is_garmin = any(pattern in volume_name for pattern in garmin_patterns)
+
+            # Also check if it has GARMIN/APPS folder structure
+            apps_folder = volume / "GARMIN" / "APPS"
+            has_apps_folder = apps_folder.exists()
+
+            if is_garmin or has_apps_folder:
+                if has_apps_folder:
+                    return {
+                        'volume': volume,
+                        'name': volume.name,
+                        'apps_folder': apps_folder
+                    }
+                # Check alternate path (some devices use GARMIN/Apps)
+                apps_folder_alt = volume / "GARMIN" / "Apps"
+                if apps_folder_alt.exists():
+                    return {
+                        'volume': volume,
+                        'name': volume.name,
+                        'apps_folder': apps_folder_alt
+                    }
+
+        return None
+
+    def refresh_garmin_mount(self):
+        """Refresh Garmin mount status"""
+        mount_info = self.find_garmin_mount()
+
+        if mount_info:
+            self.garmin_mount = mount_info
+            self.mount_status_label.config(
+                text=f"✅ Found: {mount_info['name']}",
+                fg='#2e7d32'
+            )
+            # Enable install button if we have a file selected
+            if self.selected_prg_file and self.selected_prg_file.exists():
+                self.install_prg_btn.config(state=NORMAL)
+            else:
+                self.install_prg_btn.config(state=DISABLED)
+        else:
+            self.garmin_mount = None
+            self.mount_status_label.config(
+                text="❌ No Garmin volume mounted (connect via USB Mass Storage)",
+                fg='#c62828'
+            )
+            self.install_prg_btn.config(state=DISABLED)
+
+    def install_prg_file(self):
+        """Install .PRG file to Garmin APPS folder"""
+        if not self.selected_prg_file or not self.selected_prg_file.exists():
+            messagebox.showerror("Error", "No .PRG file selected")
+            return
+
+        if not self.garmin_mount:
+            messagebox.showerror("Error", "No Garmin device mounted")
+            return
+
+        apps_folder = self.garmin_mount['apps_folder']
+
+        try:
+            # Copy .prg file to APPS folder
+            dest_path = apps_folder / self.selected_prg_file.name
+            shutil.copy2(self.selected_prg_file, dest_path)
+
+            # Success
+            self.install_status_label.config(
+                text=f"✅ Installed to {self.garmin_mount['name']}!",
+                fg='#2e7d32'
+            )
+            self.install_prg_btn.config(text="✓ Installed", bg='#4CAF50', state=DISABLED)
+
+            # Reset button after 3 seconds
+            self.root.after(3000, self._reset_install_button)
+
+            messagebox.showinfo(
+                "Success",
+                f"'{self.selected_prg_file.name}' installed successfully!\n\n"
+                f"Safely eject '{self.garmin_mount['name']}' and restart your watch to see the app."
+            )
+
+        except PermissionError:
+            messagebox.showerror("Error", "Permission denied. Try ejecting and reconnecting the device.")
+        except Exception as e:
+            messagebox.showerror("Error", f"Failed to install: {e}")
+
+    def _reset_install_button(self):
+        """Reset install button to default state"""
+        self.install_prg_btn.config(text="Install to Watch", bg='#007AFF', state=NORMAL)
+        self.install_status_label.config(text="")
 
 
 def main():
