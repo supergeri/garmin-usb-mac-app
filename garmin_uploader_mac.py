@@ -176,8 +176,8 @@ class GarminUploaderMac:
     def __init__(self, root):
         self.root = root
         self.root.title(f"{__app_name__} v{__version__}")
-        self.root.geometry("580x950")
-        self.root.resizable(False, False)
+        self.root.geometry("580x1050")
+        self.root.resizable(False, True)
         
         # Styling
         self.root.configure(bg='#f5f5f7')
