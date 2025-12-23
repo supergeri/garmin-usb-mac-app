@@ -1,5 +1,5 @@
 """Version information for Garmin Workout Uploader"""
 
-__version__ = "1.0.31"
+__version__ = "1.0.32"
 __app_name__ = "Garmin Workout Uploader"
 __github_repo__ = "supergeri/garmin-usb-mac-app"
